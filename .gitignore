@@ -10,6 +10,7 @@ __pycache__/
 
 # Marimo
 .marimo/
+__marimo__/
 
 # Testes
 .pytest_cache/

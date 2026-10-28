@@ -19,44 +19,44 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # TP2 — Exercício 1: Game of Life (etapa 3: BMC)
+    # TP2 — Exercício 1: Game of Life
 
-    **Âmbito desta versão:** FSM, testes das transições e BMC
-    da primeira propriedade (estado de erro inalcançável).
-    Não inclui indução nem k-indução.
+    ## Etapa 4 — Indução e k-indução
 
-    **Fontes:** enunciado do TP2, Capítulo 3 (FOTS/SFOTS)
-    e fichas práticas 7–9.
+    Este notebook contém:
 
-    O código foi proposto com assistência de uma LLM e
-    necessita de validação na instalação local com pySMT e Z3.
+    - Modelação da FSM do Game of Life modificado.
+    - Atualização simultânea e individual.
+    - Fronteiras fixas ou simbolicamente livres.
+    - Testes das regras e transições.
+    - Predicado de erro e BMC.
+    - Indução simples e k-indução da primeira propriedade.
 
-    **Convenções e decisões:**
+    **Fontes:** enunciado do TP2, Capítulos 3 e 4,
+    fichas práticas 7, 8 e 9.
 
-    - Para `N >= 3`, a grelha normal tem coordenadas
-      `(1..N, 1..N)`; para a entrega usar `N > 16`.
-    - Fronteira inicial: coordenadas com `i=0` ou `j=0`,
-      valores fixos ao longo das transições. No início podem
-      ser escolhidos por semente ou deixados simbólicos.
-    - Fronteira final: coordenadas com `i=N+1` ou `j=N+1`,
-      valor constante `False`, sem variáveis de estado.
-    - Modo `individual`: a cada passo aplica-se B3/S23
-      a exatamente uma célula, podendo o seu valor manter-se.
-    - O índice inteiro auxiliar da célula escolhida é uma
-      escolha não determinística por transição, não uma
-      variável do estado. Ao fazer testes SAT, o índice livre
-      é procurado existencialmente.
+    **Decisões de modelação:**
+
+    - Células normais: índices de 1 a N, com N > 16.
+    - Células iniciais: índice 0, constantes nas transições.
+    - Células finais: índice N+1, sempre mortas.
+    - A atualização individual aplica B3/S23 a uma célula,
+      mesmo quando o seu valor não muda.
+    - A fronteira pode ser fixada por semente ou deixada livre.
+
+    O código foi desenvolvido com assistência de uma LLM.
+    Os testes e resultados devem ser validados pelos alunos.
     """)
     return
 
 
 @app.cell
 def _():
-    # Contributo da LLM: proposta de modelação FOTS e
-    # construção das fórmulas pySMT.
-    # Os testes SMT devem ser executados com pySMT e Z3.
+    # Contributo da LLM:
+    # Formulação da FSM e implementação com pySMT.
 
     import random
+
     from pysmt.shortcuts import (
         And, Bool, Equals, Iff, Int, Ite,
         Not, Or, Plus, Symbol, is_sat
@@ -64,10 +64,10 @@ def _():
     from pysmt.typing import BOOL, INT
 
     def declare(t, N):
-        """Cópia t das células normais e da fronteira inicial."""
+        """Cria uma cópia das variáveis de estado."""
         if N < 3:
             raise ValueError(
-                "Usar N >= 3; no problema final exige-se N > 16."
+                "N deve ser >= 3; para o enunciado, N > 16."
             )
         return {
             (i, j): Symbol(f"x_{i}_{j}_{t}", BOOL)
@@ -86,10 +86,7 @@ def _():
         }
 
     def init(state, N, fronteira=None):
-        """
-        Estado inicial.
-        fronteira=None deixa as células iniciais livres.
-        """
+        """Predicado dos estados iniciais."""
         normais = [
             state[i, j] if i <= 3 and j <= 3
             else Not(state[i, j])
@@ -110,22 +107,17 @@ def _():
         if set(fronteira) != set(posicoes) or any(
             v not in (0, 1) for v in fronteira.values()
         ):
-            raise ValueError(
-                "A fronteira deve conter exatamente 2N+1 valores 0/1."
-            )
+            raise ValueError("Fronteira inválida")
 
         fixas = [
-            state[p] if fronteira[p] else Not(state[p])
+            state[p] if fronteira[p]
+            else Not(state[p])
             for p in posicoes
         ]
-
         return And(normais + fixas)
 
     def valor_celula(state, N, i, j):
-        """
-        Lê uma célula existente.
-        Apenas a fronteira final é constante False.
-        """
+        """Distingue células existentes, finais e inválidas."""
         if 0 <= i <= N and 0 <= j <= N:
             return state[i, j]
 
@@ -144,7 +136,7 @@ def _():
         """Regra B3/S23 para uma célula normal."""
         if not (1 <= i <= N and 1 <= j <= N):
             raise ValueError(
-                "A regra B3/S23 só se aplica a células normais."
+                "A regra só se aplica a células normais."
             )
 
         vizinhos = [
@@ -165,16 +157,11 @@ def _():
         )
 
     def trans(curr, prox, N, modo="simultanea"):
-        """
-        Relação de transição T(X,X').
-        Atualização simultânea ou individual (interpretação A).
-        """
+        """Relação de transição T(X,X')."""
         if modo not in ("simultanea", "individual"):
-            raise ValueError(
-                "modo deve ser 'simultanea' ou 'individual'."
-            )
+            raise ValueError("Modo inválido")
 
-        # As células da fronteira inicial não mudam.
+        # As células iniciais da fronteira não mudam.
         fixas = [
             Iff(prox[i, j], curr[i, j])
             for i in range(N + 1)
@@ -185,10 +172,8 @@ def _():
         restricoes = []
 
         if modo == "individual":
-            # Escolha independente para cada transição.
             escolha = Symbol(
-                "q_" + prox[1, 1].symbol_name(),
-                INT
+                "q_" + prox[1, 1].symbol_name(), INT
             )
             restricoes.extend([
                 escolha >= Int(0),
@@ -222,22 +207,15 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Testes de coerência com pySMT e Z3
+    ## Testes da FSM
 
-    Os testes usam inicialmente `N=5`, apenas para depurar
-    a implementação.
+    Começamos por testar as regras em grelhas pequenas.
 
-    Verificamos:
-    - dimensões e fronteiras;
-    - estado inicial fixo e simbólico;
-    - conservação da fronteira;
-    - atualização simultânea;
-    - atualização individual, incluindo uma atualização sem
-      alteração do valor.
+    Estes testes verificam a inicialização, a preservação
+    das fronteiras, a atualização simultânea e a atualização
+    individual, incluindo situações em que a célula não muda.
 
-    **Organização Marimo:** as variáveis temporárias estão
-    dentro de uma função local, evitando redefinições entre
-    células. Isto não altera as fórmulas SMT.
+    São testes de depuração: não substituem o requisito N > 16.
     """)
     return
 
@@ -248,12 +226,14 @@ def _(
     init, is_sat, trans, valor_celula
 ):
     def _testes_coerencia():
-        # Contributo da LLM: testes de inicialização
-        # e das duas relações de transição.
+        # Contributo da LLM: testes da FSM.
+        # Variáveis temporárias locais para evitar
+        # conflitos entre células Marimo.
 
         def configuracao(state, vivas):
             return And([
-                simbolo if pos in vivas else Not(simbolo)
+                simbolo if pos in vivas
+                else Not(simbolo)
                 for pos, simbolo in state.items()
             ])
 
@@ -264,25 +244,21 @@ def _(
 
         assert len(x0) == (N + 1) ** 2
         assert len(fr) == 2 * N + 1
-
-        # Fronteira final: células mortas.
         assert valor_celula(x0, N, N + 1, 1).is_false()
         assert valor_celula(x0, N, 1, N + 1).is_false()
 
-        # Coordenadas inválidas devem ser rejeitadas.
         try:
             valor_celula(x0, N, -1, 1)
             raise AssertionError(
-                "Uma coordenada inválida não foi rejeitada."
+                "Coordenada inválida não rejeitada"
             )
         except ValueError:
             pass
 
-        # Uma célula normal em falta não é tratada como morta.
         try:
             valor_celula({}, N, 1, 1)
             raise AssertionError(
-                "Uma célula normal em falta não foi rejeitada."
+                "Célula em falta não rejeitada"
             )
         except KeyError:
             pass
@@ -292,29 +268,26 @@ def _(
             init(x0, N, fr),
             solver_name="z3"
         )
-
         assert not is_sat(
             And(init(x0, N, fr), Not(x0[1, 1])),
             solver_name="z3"
         )
-
         assert not is_sat(
             And(init(x0, N, fr), x0[4, 4]),
             solver_name="z3"
         )
 
-        # Fronteira simbólica: ambos os valores são possíveis.
+        # Fronteira simbólica.
         assert is_sat(
             And(init(x0, N), x0[0, 0]),
             solver_name="z3"
         )
-
         assert is_sat(
             And(init(x0, N), Not(x0[0, 0])),
             solver_name="z3"
         )
 
-        # Fronteiras constantes em ambas as modalidades.
+        # Fronteiras constantes.
         for modo in ("individual", "simultanea"):
             assert not is_sat(
                 And(
@@ -325,7 +298,7 @@ def _(
                 solver_name="z3"
             )
 
-        # Blinker horizontal -> vertical.
+        # Blinker: horizontal -> vertical.
         horizontal = {(2, 1), (2, 2), (2, 3)}
         vertical = {(1, 2), (2, 2), (3, 2)}
 
@@ -334,7 +307,11 @@ def _(
         ind = trans(x0, x1, N, "individual")
 
         assert is_sat(
-            And(base, sim, configuracao(x1, vertical)),
+            And(
+                base,
+                sim,
+                configuracao(x1, vertical)
+            ),
             solver_name="z3"
         )
 
@@ -347,7 +324,7 @@ def _(
             solver_name="z3"
         )
 
-        # Uma única célula morre na modalidade individual.
+        # Atualização individual de uma célula.
         assert is_sat(
             And(
                 base,
@@ -357,15 +334,23 @@ def _(
             solver_name="z3"
         )
 
-        # Não podem ocorrer três mudanças numa transição individual.
+        # Não podem mudar três células num passo individual.
         assert not is_sat(
-            And(base, ind, configuracao(x1, vertical)),
+            And(
+                base,
+                ind,
+                configuracao(x1, vertical)
+            ),
             solver_name="z3"
         )
 
-        # Uma atualização individual pode não alterar a grelha.
+        # Uma atualização pode não alterar o estado.
         assert is_sat(
-            And(base, ind, configuracao(x1, horizontal)),
+            And(
+                base,
+                ind,
+                configuracao(x1, horizontal)
+            ),
             solver_name="z3"
         )
 
@@ -380,13 +365,11 @@ def _(mo):
     mo.md(r"""
     ## Teste na dimensão mínima obrigatória
 
-    O enunciado exige `N > 16`; por isso, usamos `N=17`.
+    Para N=17 temos 289 células normais e 35 células
+    iniciais, totalizando 324 variáveis de estado.
 
-    Este teste verifica a construção da grelha, a dimensão
-    da fronteira e a satisfatibilidade de uma transição
-    em ambas as modalidades.
-
-    Ainda não constitui uma prova da primeira propriedade.
+    Verificamos a existência de uma transição em ambas
+    as modalidades.
     """)
     return
 
@@ -397,8 +380,7 @@ def _(
     init, is_sat, trans
 ):
     def _teste_n17():
-        # Contributo da LLM: teste de construção
-        # na dimensão mínima exigida.
+        # Contributo da LLM: teste na dimensão mínima.
 
         N = 17
         X = declare("N17_a", N)
@@ -416,7 +398,6 @@ def _(
             And(I17, T17_sim),
             solver_name="z3"
         )
-
         assert is_sat(
             And(I17, T17_ind),
             solver_name="z3"
@@ -434,19 +415,18 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Teste de escolhas individuais consecutivas
+    ## Duas atualizações individuais consecutivas
 
-    No modo individual, cada transição deve permitir
-    uma escolha diferente da célula a atualizar.
+    Testamos que cada transição individual possui
+    uma escolha independente.
 
-    Usamos `N=5`, com fronteira morta:
+    Com N=5 e fronteira morta:
 
-    1. A primeira transição seleciona `(5,5)`, que continua morta.
-    2. A segunda seleciona `(2,2)`, que morre por ter oito
-       vizinhos vivos.
+    - Primeiro passo: selecionar (5,5), que não muda.
+    - Segundo passo: selecionar (2,2), que morre
+      por ter oito vizinhos vivos.
 
-    Este teste confirma também que uma atualização pode não
-    alterar o valor da célula selecionada.
+    Os dois passos utilizam escolhas diferentes.
     """)
     return
 
@@ -454,8 +434,7 @@ def _(mo):
 @app.cell
 def _(And, Not, declare, init, is_sat, trans):
     def _teste_duas_escolhas():
-        # Contributo da LLM: teste SMT de
-        # duas escolhas individuais consecutivas.
+        # Contributo da LLM: teste de escolhas consecutivas.
 
         from pysmt.shortcuts import (
             Symbol as TestSymbol,
@@ -464,17 +443,16 @@ def _(And, Not, declare, init, is_sat, trans):
         )
         from pysmt.typing import INT as TEST_INT
 
-        n_teste = 5
-
+        N = 5
         a, b, c = [
-            declare(f"duas_escolhas_{t}", n_teste)
+            declare(f"duas_escolhas_{t}", N)
             for t in range(3)
         ]
 
         zeros = {
             (i, j): 0
-            for i in range(n_teste + 1)
-            for j in range(n_teste + 1)
+            for i in range(N + 1)
+            for j in range(N + 1)
             if i == 0 or j == 0
         }
 
@@ -482,21 +460,18 @@ def _(And, Not, declare, init, is_sat, trans):
             "q_" + b[1, 1].symbol_name(),
             TEST_INT
         )
-
         q_bc = TestSymbol(
             "q_" + c[1, 1].symbol_name(),
             TEST_INT
         )
 
         dois_passos = And(
-            init(a, n_teste, zeros),
-            trans(a, b, n_teste, "individual"),
-            trans(b, c, n_teste, "individual"),
-
-            TestEquals(q_ab, TestInt(24)),  # (5,5)
-            TestEquals(q_bc, TestInt(6)),   # (2,2)
-
-            init(b, n_teste, zeros),
+            init(a, N, zeros),
+            trans(a, b, N, "individual"),
+            trans(b, c, N, "individual"),
+            TestEquals(q_ab, TestInt(24)),
+            TestEquals(q_bc, TestInt(6)),
+            init(b, N, zeros),
             Not(c[2, 2]),
             c[1, 1]
         )
@@ -518,18 +493,19 @@ def _(And, Not, declare, init, is_sat, trans):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Primeira propriedade — não alcançar o estado de erro
+    ## Primeira propriedade: estado de erro
 
-    Segundo o enunciado, um estado de erro ocorre quando
-    todas as células **normais** estão mortas.
+    Um estado de erro ocorre quando todas as células
+    normais estão mortas.
 
-    $$E(X)=\bigwedge_{i=1}^{N}\bigwedge_{j=1}^{N}\neg x_{i,j}$$
+    $$E(X)=\bigwedge_{i=1}^{N}
+    \bigwedge_{j=1}^{N}\neg x_{i,j}$$
 
-    A propriedade de segurança é:
+    Queremos provar a propriedade:
 
     $$G\neg E$$
 
-    Usando BMC, procuramos um percurso de comprimento `k`
+    O BMC procura um percurso com k transições
     que termine num estado de erro:
 
     $$
@@ -538,25 +514,16 @@ def _(mo):
     \land E(X^k)
     $$
 
-    Testamos `k=0,1,...,K` por ordem crescente.
-
-    - `SAT`: existe um contraexemplo até à profundidade testada.
-    - `UNSAT`: não existe contraexemplo nessa profundidade.
-
-    Se todas as profundidades até `K` forem `UNSAT`,
-    **não temos ainda uma prova global**.
-
-    Quando existir um contraexemplo, extraímos os estados
-    e validamos as transições com regras Python independentes
-    das fórmulas SMT.
+    SAT fornece um contraexemplo alcançável.
+    UNSAT até K não constitui uma prova global.
     """)
     return
 
 
 @app.cell
 def _(And, Not, declare, init, trans):
-    # Contributo da LLM: predicado de erro,
-    # BMC incremental e validador independente.
+    # Contributo da LLM:
+    # Predicado de erro, BMC e validador independente.
 
     from pysmt.shortcuts import (
         Solver as BMCSolver,
@@ -565,7 +532,7 @@ def _(And, Not, declare, init, trans):
     from pysmt.typing import INT as BMC_INT
 
     def error(state, N):
-        """Todas as N² células normais estão mortas."""
+        """Todas as células normais estão mortas."""
         return And([
             Not(state[i, j])
             for i in range(1, N + 1)
@@ -573,7 +540,8 @@ def _(And, Not, declare, init, trans):
         ])
 
     def validar_traco(estados, N, modo, escolhas, fronteira=None):
-        """Valida um percurso sem usar pySMT nem Z3."""
+        """Valida um contraexemplo sem utilizar o solver."""
+
         if modo not in ("individual", "simultanea"):
             raise ValueError("Modo inválido")
 
@@ -615,11 +583,13 @@ def _(And, Not, declare, init, trans):
                 f"Coordenadas inválidas: ({i}, {j})"
             )
 
+        # Verificar os estados.
         for s in estados:
             assert set(s) == posicoes
 
             assert all(
-                type(v) is bool for v in s.values()
+                type(v) is bool
+                for v in s.values()
             )
 
             if fronteira is not None:
@@ -633,13 +603,13 @@ def _(And, Not, declare, init, trans):
                 for p in iniciais
             )
 
-        # Confirmar o estado inicial.
+        # Estado inicial.
         assert all(
             estados[0][i, j] == (i <= 3 and j <= 3)
             for i, j in normais
         )
 
-        # Confirmar cada transição.
+        # Verificar todas as transições.
         for t, (antes, depois) in enumerate(
             zip(estados, estados[1:])
         ):
@@ -662,7 +632,7 @@ def _(And, Not, declare, init, trans):
                 )
 
                 novo = (
-                    (viz == 3)
+                    viz == 3
                     or (antes[i, j] and viz == 2)
                 )
 
@@ -681,7 +651,7 @@ def _(And, Not, declare, init, trans):
                     t, i, j
                 )
 
-        # O estado final deve ser um estado de erro.
+        # O último estado tem de ser um erro.
         assert not any(
             estados[-1][i, j]
             for i, j in normais
@@ -690,18 +660,14 @@ def _(And, Not, declare, init, trans):
         return True
 
     def bmc_erro(N, modo, K, fronteira=None):
-        """
-        Procura um estado de erro até à profundidade K.
-        Devolve o primeiro contraexemplo encontrado.
-        """
+        """Procura um contraexemplo até profundidade K."""
+
         if (
             N < 3
             or K < 0
             or modo not in ("individual", "simultanea")
         ):
-            raise ValueError(
-                "Exige-se N>=3, K>=0 e um modo válido"
-            )
+            raise ValueError("Parâmetros inválidos")
 
         estados = [
             declare(f"bmc_{modo}_{N}_{t}", N)
@@ -725,12 +691,13 @@ def _(And, Not, declare, init, trans):
                     )
 
                 s.push()
-                s.add_assertion(error(estados[k], N))
+                s.add_assertion(
+                    error(estados[k], N)
+                )
 
                 encontrado = s.solve()
 
                 if encontrado:
-                    # Extrair o modelo SAT.
                     concretos = [
                         {
                             p: bool(s.get_py_value(simbolo))
@@ -752,7 +719,7 @@ def _(And, Not, declare, init, trans):
                     else:
                         escolhas = [None] * k
 
-                    # Validação independente do solver.
+                    # Verificação independente.
                     validar_traco(
                         concretos,
                         N,
@@ -762,11 +729,10 @@ def _(And, Not, declare, init, trans):
                     )
 
                     print(
-                        f"SAT: estado de erro alcançado em k={k}; "
+                        f"SAT: erro alcançado em k={k}; "
                         "percurso validado."
                     )
 
-                    # Apresentar os estados.
                     for t, grelha in enumerate(concretos):
                         print(f"Estado {t}:")
 
@@ -784,9 +750,11 @@ def _(And, Not, declare, init, trans):
 
                         if t < k and modo == "individual":
                             q = escolhas[t]
+
                             print(
-                                "  Próxima célula escolhida: "
-                                f"({q // N + 1},{q % N + 1}), q={q}"
+                                "Próxima célula: "
+                                f"({q // N + 1},{q % N + 1}), "
+                                f"q={q}"
                             )
 
                     return {
@@ -803,6 +771,7 @@ def _(And, Not, declare, init, trans):
             "sem contraexemplo neste limite; "
             "não é prova global."
         )
+
         return None
 
     return (error, validar_traco, bmc_erro)
@@ -811,133 +780,106 @@ def _(And, Not, declare, init, trans):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Teste de controlo: contraexemplo conhecido
+    ## Teste positivo do BMC
 
-    Neste teste de depuração usamos `N=3` e uma fronteira
-    inteiramente morta.
+    Grelha N=3 com fronteira toda morta.
 
-    Com atualização simultânea:
+    Na atualização simultânea:
 
-    - Estado inicial: 9 células vivas.
-    - Após uma transição: 4 células vivas nos cantos.
-    - Após duas transições: 0 células vivas.
+    - Inicialmente: 9 células vivas.
+    - Depois do primeiro passo: 4 células vivas.
+    - Depois do segundo passo: 0 células vivas.
 
-    Esperamos encontrar um contraexemplo em `k=2`.
+    Esperamos um contraexemplo em k=2.
 
-    Este exemplo não satisfaz a dimensão mínima do enunciado.
-    Serve apenas para testar a implementação do BMC.
+    Este teste serve apenas para verificar o BMC.
     """)
     return
 
 
 @app.cell
 def _(bmc_erro):
-    def _teste_controlo_bmc():
-        # Contributo da LLM: teste positivo do BMC
-        # e da validação independente.
+    def _teste_controlo():
+        # Contributo da LLM:
+        # Teste conhecido de contraexemplo.
 
-        n_controle = 3
+        N = 3
 
-        borda_zero = {
+        zeros = {
             (i, j): 0
-            for i in range(n_controle + 1)
-            for j in range(n_controle + 1)
+            for i in range(N + 1)
+            for j in range(N + 1)
             if i == 0 or j == 0
         }
 
-        controle = bmc_erro(
-            n_controle,
-            "simultanea",
-            2,
-            borda_zero
+        resultado = bmc_erro(
+            N, "simultanea", 2, zeros
         )
 
-        assert (
-            controle is not None
-            and controle["profundidade"] == 2
-            and controle["validado"]
-        )
+        assert resultado is not None
+        assert resultado["profundidade"] == 2
+        assert resultado["validado"]
 
-        print(
-            "Teste de controlo SAT em N=3 concluído "
-            "(se o solver confirmou k=2)."
-        )
+        print("Teste de controlo BMC concluído.")
 
-    _teste_controlo_bmc()
+    _teste_controlo()
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Experiências BMC de profundidade reduzida
+    ## BMC com quatro configurações
 
-    Vamos testar `N=5`, com profundidade máxima `K=2`,
-    nas quatro combinações:
+    Começamos por N=5 e K=2.
 
-    1. Simultânea, fronteira fixa.
-    2. Simultânea, fronteira simbólica.
-    3. Individual, fronteira fixa.
-    4. Individual, fronteira simbólica.
+    Testamos:
+    - Atualização simultânea com fronteira fixa.
+    - Atualização simultânea com fronteira simbólica.
+    - Atualização individual com fronteira fixa.
+    - Atualização individual com fronteira simbólica.
 
-    Os resultados observados podem depender da modalidade
-    e da configuração inicial.
-
-    Estes testes continuam a ser apenas experiências de
-    depuração e não provas para `N > 16`.
+    Estes resultados não substituem testes com N>16.
     """)
     return
 
 
 @app.cell
 def _(bmc_erro, fronteira_aleatoria):
-    def _teste_cenarios_bmc():
-        # Contributo da LLM: experiências BMC
-        # nas quatro combinações.
+    def _testes_bmc_pequeno():
+        # Contributo da LLM:
+        # Comparação das quatro configurações.
 
-        N_pequeno = 5
-        K_pequeno = 2
+        N = 5
+        K = 2
 
-        fixa = fronteira_aleatoria(N_pequeno, 42)
+        fixa = fronteira_aleatoria(N, 42)
 
-        for modo_pequeno in (
-            "simultanea",
-            "individual"
-        ):
-            for fronteira_nome, fronteira_valores in (
+        for modo in ("simultanea", "individual"):
+            for nome, fronteira in (
                 ("fixa", fixa),
                 ("simbólica", None)
             ):
                 print(
-                    f"\nModo {modo_pequeno} | "
-                    f"fronteira {fronteira_nome} | "
-                    f"N={N_pequeno}, K={K_pequeno}"
+                    f"\nModo={modo}, fronteira={nome}, "
+                    f"N={N}, K={K}"
                 )
 
-                bmc_erro(
-                    N_pequeno,
-                    modo_pequeno,
-                    K_pequeno,
-                    fronteira_valores
-                )
+                bmc_erro(N, modo, K, fronteira)
 
-    _teste_cenarios_bmc()
+    _testes_bmc_pequeno()
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Verificação na dimensão obrigatória: N=17
+    ## BMC para N=17
 
-    Começamos por uma experiência com `N=17`, `K=1`,
-    fronteira fixa com semente 42 e atualização simultânea.
+    Primeira experiência na dimensão mínima obrigatória.
 
-    As outras combinações estão indicadas no código,
-    para serem executadas posteriormente, uma de cada vez.
-
-    Não devemos aumentar a profundidade antes de verificar
-    os resultados e os tempos de execução.
+    Utilizamos K=1, fronteira gerada com semente 42
+    e atualização simultânea.
     """)
     return
 
@@ -945,27 +887,22 @@ def _(mo):
 @app.cell
 def _(bmc_erro, fronteira_aleatoria):
     def _teste_bmc_n17():
-        # Contributo da LLM: primeira experiência BMC
-        # com a dimensão mínima exigida.
+        # Contributo da LLM:
+        # Primeira experiência obrigatória.
 
-        n_real = 17
-        k_real = 1
+        N = 17
+        K = 1
 
-        fronteira_real = fronteira_aleatoria(
-            n_real, 42
+        fixa = fronteira_aleatoria(N, 42)
+
+        bmc_erro(
+            N, "simultanea", K, fixa
         )
 
-        resultado_real = bmc_erro(
-            n_real,
-            "simultanea",
-            k_real,
-            fronteira_real
-        )
-
-        # Experiências seguintes, a executar uma a uma:
-        # bmc_erro(n_real, "individual", k_real, fronteira_real)
-        # bmc_erro(n_real, "simultanea", k_real, None)
-        # bmc_erro(n_real, "individual", k_real, None)
+        # Outras experiências:
+        # bmc_erro(N, "individual", K, fixa)
+        # bmc_erro(N, "simultanea", K, None)
+        # bmc_erro(N, "individual", K, None)
 
     _teste_bmc_n17()
     return
@@ -974,33 +911,412 @@ def _(bmc_erro, fronteira_aleatoria):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Limitações e reprodução
+    ## Limitações do BMC
 
-    - `N=3` e `N=5` servem apenas para depuração.
-    - A dimensão mínima válida é `N=17`.
-    - `UNSAT` até `K` não prova que o erro nunca será alcançado.
-    - `SAT` fornece um contraexemplo, que deve ser validado.
-    - Uma fronteira fixa com semente representa apenas uma
+    - SAT com percurso validado demonstra que a segurança
+      é violada.
+    - UNSAT até K exclui contraexemplos nesse limite.
+    - Uma fronteira aleatória fixa representa apenas uma
       configuração inicial.
-    - A fronteira simbólica considera todas as configurações
-      possíveis, sem lhes atribuir probabilidades.
-    - As versões das ferramentas, parâmetros e resultados reais
-      devem ser registados após a execução.
+    - A fronteira simbólica representa todas as configurações
+      possíveis, mas não probabilidades.
+    - As medições de desempenho devem ser registadas
+      após execução real.
 
-    **Contribuição da LLM:**
+    **Contribuição LLM:** construção do BMC, extração
+    de contraexemplos e verificação independente.
+    """)
+    return
 
-    - Formalização e implementação da FSM.
-    - Construção das relações de transição.
-    - Predicado de erro e BMC.
-    - Extração e validação independente dos contraexemplos.
-    - Testes e organização das células Marimo.
 
-    A solução e os resultados devem ser revistos pelos alunos,
-    e a ligação para o diálogo com a LLM deve acompanhar
-    a entrega do trabalho.
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Indução simples e k-indução
 
-    **Próxima etapa:** após validar este BMC, discutir
-    indução e k-indução para a primeira propriedade.
+    Queremos provar o invariante:
+
+    $$P(X)=\neg E(X)$$
+
+    Ou seja, pelo menos uma célula normal está viva.
+
+    ### Indução simples
+
+    Verificar que ambas as fórmulas são UNSAT:
+
+    **Base:**
+
+    $$I(X_0)\land E(X_0)$$
+
+    **Passo:**
+
+    $$\neg E(X_0)\land T(X_0,X_1)\land E(X_1)$$
+
+    ### k-indução
+
+    A base exclui estados de erro alcançáveis nas
+    profundidades `0,...,k-1`, através do BMC.
+
+    O passo procura uma sequência arbitrária de k transições:
+
+    $$
+    \bigwedge_{t=0}^{k-1}\neg E(X_t)
+    \land
+    \bigwedge_{t=0}^{k-1}T(X_t,X_{t+1})
+    \land E(X_k)
+    $$
+
+    **Com fronteira fixa**, acrescentamos o predicado
+    $B_b(X_0)$ que fixa os seus valores no início do passo.
+    A relação `trans` preserva esses valores nos estados
+    seguintes.
+
+    Não se impõe `init(X_0)` no passo: isso restringiria
+    indevidamente os estados arbitrários.
+
+    **Interpretação dos resultados:**
+
+    - BASE SAT: contraexemplo alcançável, encontrado pelo BMC.
+    - BASE UNSAT e PASSO UNSAT: prova global.
+    - BASE UNSAT e PASSO SAT: tentativa inconclusiva.
+
+    O modelo SAT do passo indutivo não prova acessibilidade.
+    """)
+    return
+
+
+@app.cell
+def _(
+    And, Not, declare, trans,
+    error, bmc_erro
+):
+    # Contributo da LLM:
+    # Implementação de indução simples e k-indução.
+    #
+    # Alteração nesta revisão:
+    # - Resultados BASE e PASSO apresentados separadamente.
+    # - Confirmação da fronteira fixa nos modelos SAT do passo.
+
+    from pysmt.shortcuts import Solver as IndSolver
+
+    def k_inducao(N, modo, k, fronteira=None):
+        """
+        Verifica base e passo da k-indução.
+
+        Resultados:
+        - 'provada': base e passo UNSAT;
+        - 'refutada': BMC encontrou contraexemplo real;
+        - 'inconclusiva': passo indutivo SAT.
+        """
+
+        if (
+            N < 3
+            or k < 1
+            or modo not in ("simultanea", "individual")
+        ):
+            raise ValueError("Parâmetros inválidos")
+
+        print(
+            f"\n{k}-indução | N={N} | modo={modo} | "
+            f"fronteira={'simbólica' if fronteira is None else 'fixa'}"
+        )
+
+        # BASE: verificar acessibilidade até k-1.
+        print(
+            f"BASE: procurar erro nas profundidades 0..{k - 1}."
+        )
+
+        contraexemplo = bmc_erro(
+            N, modo, k - 1, fronteira
+        )
+
+        if contraexemplo is not None:
+            print(
+                "BASE: SAT — contraexemplo alcançável e validado "
+                f"em k={contraexemplo['profundidade']}."
+            )
+            print(
+                "PASSO: não executado "
+                "(a propriedade já foi refutada)."
+            )
+            print("CONCLUSÃO: REFUTADA.")
+
+            return "refutada"
+
+        print(
+            f"BASE: UNSAT para as profundidades 0..{k - 1}."
+        )
+
+        # PASSO INDUTIVO:
+        # Os estados não são necessariamente alcançáveis.
+        print(
+            "PASSO: a verificar preservação da propriedade..."
+        )
+
+        X = [
+            declare(f"kind_{modo}_{N}_{k}_{t}", N)
+            for t in range(k + 1)
+        ]
+
+        # P(X0), ..., P(X(k-1)).
+        formulas = [
+            Not(error(X[t], N))
+            for t in range(k)
+        ]
+
+        # k transições consecutivas.
+        formulas += [
+            trans(X[t], X[t + 1], N, modo)
+            for t in range(k)
+        ]
+
+        # Negação da propriedade no último estado.
+        formulas.append(error(X[k], N))
+
+        if fronteira is not None:
+            # O primeiro estado é arbitrário, mas a fronteira
+            # tem de coincidir com a configuração fixa.
+            #
+            # As transições preservam a fronteira.
+            # Não impomos init(X[0]), pois isso seria
+            # incorreto para um passo indutivo geral.
+
+            formulas.extend([
+                X[0][p] if valor else Not(X[0][p])
+                for p, valor in fronteira.items()
+            ])
+
+        with IndSolver(name="z3") as solver:
+            solver.add_assertion(And(formulas))
+
+            if solver.solve():
+                # Verificar que um modelo SAT com fronteira
+                # fixa respeita essa fronteira em todos
+                # os estados do passo indutivo.
+
+                if fronteira is not None:
+                    assert all(
+                        bool(solver.get_py_value(X[t][p]))
+                        == bool(valor)
+                        for t in range(k + 1)
+                        for p, valor in fronteira.items()
+                    ), (
+                        "A fronteira do modelo indutivo "
+                        "não foi preservada"
+                    )
+
+                # Contar as células normais vivas
+                # em cada estado do modelo indutivo.
+                vivos = [
+                    sum(
+                        bool(solver.get_py_value(X[t][i, j]))
+                        for i in range(1, N + 1)
+                        for j in range(1, N + 1)
+                    )
+                    for t in range(k + 1)
+                ]
+
+                print(
+                    "PASSO: SAT — a hipótese indutiva "
+                    "é insuficiente."
+                )
+
+                print(
+                    "Células normais vivas nos estados "
+                    "arbitrários:", vivos
+                )
+
+                if fronteira is not None:
+                    print(
+                        "Fronteira fixa respeitada "
+                        "em todos os estados."
+                    )
+
+                print(
+                    "A acessibilidade do primeiro estado "
+                    "não foi demonstrada."
+                )
+
+                print(
+                    "CONCLUSÃO: INCONCLUSIVA "
+                    "(não é uma refutação)."
+                )
+
+                return "inconclusiva"
+
+        print(
+            "PASSO: UNSAT — a preservação foi demonstrada."
+        )
+        print(
+            "CONCLUSÃO: PROVADA (base e passo UNSAT)."
+        )
+
+        return "provada"
+
+    def inducao_simples(N, modo, fronteira=None):
+        """Indução simples corresponde a k=1."""
+        return k_inducao(N, modo, 1, fronteira)
+
+    return (inducao_simples, k_inducao)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Testes da indução com N=5
+
+    Começamos por casos pequenos, cujos resultados
+    conseguimos justificar logicamente.
+
+    Com fronteira simbólica, existe um estado arbitrário
+    com apenas uma célula normal viva, que pode evoluir
+    para o estado de erro.
+
+    Assim, o passo da indução simples deve falhar nas
+    duas modalidades, sem que isso constitua um
+    contraexemplo alcançável.
+
+    Na modalidade individual, podemos prolongar um
+    estado com uma única célula viva através de
+    atualizações que não mudam o estado e, no último
+    passo, atualizar a célula viva.
+
+    Por isso, testamos também k=2 e k=3.
+    """)
+    return
+
+
+@app.cell
+def _(inducao_simples, k_inducao):
+    def _testes_indutivos_pequenos():
+        # Contributo da LLM:
+        # Testes dos métodos indutivos.
+
+        N = 5
+
+        # Indução simples com fronteira simbólica.
+        for modo in ("simultanea", "individual"):
+            resultado = inducao_simples(
+                N, modo, None
+            )
+            assert resultado == "inconclusiva"
+
+        # k-indução individual.
+        assert k_inducao(
+            N, "individual", 2, None
+        ) == "inconclusiva"
+
+        assert k_inducao(
+            N, "individual", 3, None
+        ) == "inconclusiva"
+
+        # k-indução simultânea, k=2:
+        # observar o resultado sem o pressupor.
+        k_inducao(
+            N, "simultanea", 2, None
+        )
+
+        print(
+            "Testes indutivos com N=5 concluídos."
+        )
+
+    _testes_indutivos_pequenos()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Indução simples com N=17
+
+    Agora testamos a dimensão mínima exigida pelo
+    enunciado.
+
+    Para cada modalidade consideramos:
+
+    - Fronteira fixa, com semente 42.
+    - Fronteira simbolicamente livre.
+
+    Não assumimos antecipadamente que a propriedade
+    seja verdadeira ou falsa.
+
+    Um resultado `inconclusiva` significa apenas que
+    a indução simples não conseguiu demonstrá-la.
+
+    Depois de observarmos estes resultados, poderemos
+    executar k=2 com N=17, se houver justificação.
+    """)
+    return
+
+
+@app.cell
+def _(inducao_simples, fronteira_aleatoria):
+    def _testes_indutivos_n17():
+        # Contributo da LLM:
+        # Experiências na dimensão mínima obrigatória.
+
+        N = 17
+        fixa = fronteira_aleatoria(N, 42)
+
+        for modo in ("simultanea", "individual"):
+            for fronteira in (fixa, None):
+                inducao_simples(
+                    N, modo, fronteira
+                )
+
+    _testes_indutivos_n17()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Conclusões e limitações
+
+    A primeira propriedade é uma propriedade de segurança:
+    nunca alcançar o estado de erro.
+
+    Os métodos têm significados diferentes:
+
+    - BMC SAT com percurso validado: refutação real.
+    - BMC UNSAT até K: ausência de erro apenas até K.
+    - BASE UNSAT e PASSO UNSAT: prova global.
+    - BASE UNSAT e PASSO SAT: tentativa inconclusiva.
+
+    A fronteira fixa é considerada no passo indutivo.
+    Os seus valores são preservados por todas as transições.
+
+    A k-indução não tem de conseguir provar uma
+    propriedade verdadeira.
+
+    Na modalidade individual, os passos sem mudança
+    permitem construir sequências arbitrárias que podem
+    impedir o sucesso da k-indução simples.
+
+    Para reproduzir os resultados devem registar-se:
+
+    - Versões de Python, pySMT e Z3.
+    - Dimensão N.
+    - Modalidade de transição.
+    - Fronteira fixa ou simbólica.
+    - Semente, quando aplicável.
+    - Profundidade K ou valor de k.
+    - Resultados e tempos efetivamente observados.
+
+    **Contribuições da LLM nesta etapa:**
+
+    - Formulação das obrigações indutivas.
+    - Implementação da indução e k-indução.
+    - Reutilização do BMC para os casos de base.
+    - Restrição correta das fronteiras fixas.
+    - Verificação dos modelos SAT do passo indutivo.
+    - Organização dos resultados em BASE, PASSO e CONCLUSÃO.
+
+    A validação experimental deve ser confirmada pelos
+    alunos antes de constar como resultado do trabalho.
+
+    A segunda propriedade será tratada depois de
+    analisarmos os resultados desta etapa.
     """)
     return
 
