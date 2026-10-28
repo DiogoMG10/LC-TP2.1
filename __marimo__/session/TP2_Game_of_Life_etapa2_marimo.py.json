@@ -1,0 +1,285 @@
+{
+  "version": "1",
+  "metadata": {
+    "marimo_version": "0.25.0",
+    "script_metadata_hash": "064ba78f94d7523915103d52f9ef470d"
+  },
+  "cells": [
+    {
+      "id": "Hbol",
+      "code_hash": "1d0db38904205bec4d6f6f6a1f6cec3e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "MJUe",
+      "code_hash": "fc5ddd47eedbeebcc46a729c39c17b0b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h1 id=\"tp2-exercicio-1-game-of-life-etapa-3-bmc\">TP2 \u2014 Exerc\u00edcio 1: Game of Life (etapa 3: BMC)</h1>\n<span class=\"paragraph\"><strong>\u00c2mbito desta vers\u00e3o:</strong> FSM, testes das transi\u00e7\u00f5es e BMC\nda primeira propriedade (estado de erro inalcan\u00e7\u00e1vel).\nN\u00e3o inclui indu\u00e7\u00e3o nem k-indu\u00e7\u00e3o.</span>\n<span class=\"paragraph\"><strong>Fontes:</strong> enunciado do TP2, Cap\u00edtulo 3 (FOTS/SFOTS)\ne fichas pr\u00e1ticas 7\u20139.</span>\n<span class=\"paragraph\">O c\u00f3digo foi proposto com assist\u00eancia de uma LLM e\nnecessita de valida\u00e7\u00e3o na instala\u00e7\u00e3o local com pySMT e Z3.</span>\n<span class=\"paragraph\"><strong>Conven\u00e7\u00f5es e decis\u00f5es:</strong></span>\n<ul>\n<li>Para <code>N &gt;= 3</code>, a grelha normal tem coordenadas\n  <code>(1..N, 1..N)</code>; para a entrega usar <code>N &gt; 16</code>.</li>\n<li>Fronteira inicial: coordenadas com <code>i=0</code> ou <code>j=0</code>,\n  valores fixos ao longo das transi\u00e7\u00f5es. No in\u00edcio podem\n  ser escolhidos por semente ou deixados simb\u00f3licos.</li>\n<li>Fronteira final: coordenadas com <code>i=N+1</code> ou <code>j=N+1</code>,\n  valor constante <code>False</code>, sem vari\u00e1veis de estado.</li>\n<li>Modo <code>individual</code>: a cada passo aplica-se B3/S23\n  a exatamente uma c\u00e9lula, podendo o seu valor manter-se.</li>\n<li>O \u00edndice inteiro auxiliar da c\u00e9lula escolhida \u00e9 uma\n  escolha n\u00e3o determin\u00edstica por transi\u00e7\u00e3o, n\u00e3o uma\n  vari\u00e1vel do estado. Ao fazer testes SAT, o \u00edndice livre\n  \u00e9 procurado existencialmente.</li>\n</ul></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "vblA",
+      "code_hash": "68cc690860ac8b5a36bd3991a88e426e",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "bkHC",
+      "code_hash": "420f09b16db07324853c264ef180cbde",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"testes-de-coerencia-com-pysmt-e-z3\">Testes de coer\u00eancia com pySMT e Z3</h2>\n<span class=\"paragraph\">Os testes usam inicialmente <code>N=5</code>, apenas para depurar\na implementa\u00e7\u00e3o.</span>\n<span class=\"paragraph\">Verificamos:</span>\n<ul>\n<li>dimens\u00f5es e fronteiras;</li>\n<li>estado inicial fixo e simb\u00f3lico;</li>\n<li>conserva\u00e7\u00e3o da fronteira;</li>\n<li>atualiza\u00e7\u00e3o simult\u00e2nea;</li>\n<li>atualiza\u00e7\u00e3o individual, incluindo uma atualiza\u00e7\u00e3o sem\n  altera\u00e7\u00e3o do valor.</li>\n</ul>\n<span class=\"paragraph\"><strong>Organiza\u00e7\u00e3o Marimo:</strong> as vari\u00e1veis tempor\u00e1rias est\u00e3o\ndentro de uma fun\u00e7\u00e3o local, evitando redefini\u00e7\u00f5es entre\nc\u00e9lulas. Isto n\u00e3o altera as f\u00f3rmulas SMT.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "lEQa",
+      "code_hash": "37d4ef56f037c1a6dd19c56538f9db23",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "Testes SMT para N=5 conclu\u00eddos.\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "PKri",
+      "code_hash": "2983e3aba84a9b38f183dcbb4b808d0a",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"teste-na-dimensao-minima-obrigatoria\">Teste na dimens\u00e3o m\u00ednima obrigat\u00f3ria</h2>\n<span class=\"paragraph\">O enunciado exige <code>N &gt; 16</code>; por isso, usamos <code>N=17</code>.</span>\n<span class=\"paragraph\">Este teste verifica a constru\u00e7\u00e3o da grelha, a dimens\u00e3o\nda fronteira e a satisfatibilidade de uma transi\u00e7\u00e3o\nem ambas as modalidades.</span>\n<span class=\"paragraph\">Ainda n\u00e3o constitui uma prova da primeira propriedade.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Xref",
+      "code_hash": "339627068feddf05bbac2fe653e1f99b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "Constru\u00e7\u00e3o e testes de um passo para N=17 conclu\u00eddos.\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "SFPL",
+      "code_hash": "61fca1e1c290ce7a23bb21703da47c74",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"teste-de-escolhas-individuais-consecutivas\">Teste de escolhas individuais consecutivas</h2>\n<span class=\"paragraph\">No modo individual, cada transi\u00e7\u00e3o deve permitir\numa escolha diferente da c\u00e9lula a atualizar.</span>\n<span class=\"paragraph\">Usamos <code>N=5</code>, com fronteira morta:</span>\n<ol>\n<li>A primeira transi\u00e7\u00e3o seleciona <code>(5,5)</code>, que continua morta.</li>\n<li>A segunda seleciona <code>(2,2)</code>, que morre por ter oito\n   vizinhos vivos.</li>\n</ol>\n<span class=\"paragraph\">Este teste confirma tamb\u00e9m que uma atualiza\u00e7\u00e3o pode n\u00e3o\nalterar o valor da c\u00e9lula selecionada.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "BYtC",
+      "code_hash": "bd693e28f41e2ff1ab29599f663833f3",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "Teste SMT de duas escolhas individuais consecutivas: SAT (conforme esperado).\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "RGSE",
+      "code_hash": "61b60c20946baa27bae8cd38b47b28ed",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"primeira-propriedade-nao-alcancar-o-estado-de-erro\">Primeira propriedade \u2014 n\u00e3o alcan\u00e7ar o estado de erro</h2>\n<span class=\"paragraph\">Segundo o enunciado, um estado de erro ocorre quando\ntodas as c\u00e9lulas <strong>normais</strong> est\u00e3o mortas.</span>\n<marimo-tex class=\"arithmatex\">||[E(X)=\\bigwedge_{i=1}^{N}\\bigwedge_{j=1}^{N}\\neg x_{i,j}||]</marimo-tex><span class=\"paragraph\">A propriedade de seguran\u00e7a \u00e9:</span>\n<marimo-tex class=\"arithmatex\">||[G\\neg E||]</marimo-tex><span class=\"paragraph\">Usando BMC, procuramos um percurso de comprimento <code>k</code>\nque termine num estado de erro:</span>\n<marimo-tex class=\"arithmatex\">||[\nI(X^0)\\land\n\\bigwedge_{t=0}^{k-1}T(X^t,X^{t+1})\n\\land E(X^k)\n||]</marimo-tex><span class=\"paragraph\">Testamos <code>k=0,1,...,K</code> por ordem crescente.</span>\n<ul>\n<li><code>SAT</code>: existe um contraexemplo at\u00e9 \u00e0 profundidade testada.</li>\n<li><code>UNSAT</code>: n\u00e3o existe contraexemplo nessa profundidade.</li>\n</ul>\n<span class=\"paragraph\">Se todas as profundidades at\u00e9 <code>K</code> forem <code>UNSAT</code>,\n<strong>n\u00e3o temos ainda uma prova global</strong>.</span>\n<span class=\"paragraph\">Quando existir um contraexemplo, extra\u00edmos os estados\ne validamos as transi\u00e7\u00f5es com regras Python independentes\ndas f\u00f3rmulas SMT.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Kclp",
+      "code_hash": "3ba7760184c4a6df6a1d4565bba4fc45",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "emfo",
+      "code_hash": "7b2649d40347ec9b7f84a6f0f48b77d8",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"teste-de-controlo-contraexemplo-conhecido\">Teste de controlo: contraexemplo conhecido</h2>\n<span class=\"paragraph\">Neste teste de depura\u00e7\u00e3o usamos <code>N=3</code> e uma fronteira\ninteiramente morta.</span>\n<span class=\"paragraph\">Com atualiza\u00e7\u00e3o simult\u00e2nea:</span>\n<ul>\n<li>Estado inicial: 9 c\u00e9lulas vivas.</li>\n<li>Ap\u00f3s uma transi\u00e7\u00e3o: 4 c\u00e9lulas vivas nos cantos.</li>\n<li>Ap\u00f3s duas transi\u00e7\u00f5es: 0 c\u00e9lulas vivas.</li>\n</ul>\n<span class=\"paragraph\">Esperamos encontrar um contraexemplo em <code>k=2</code>.</span>\n<span class=\"paragraph\">Este exemplo n\u00e3o satisfaz a dimens\u00e3o m\u00ednima do enunciado.\nServe apenas para testar a implementa\u00e7\u00e3o do BMC.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "Hstk",
+      "code_hash": "4b730bca8cc616705f28dac3f79ac127",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "SAT: estado de erro alcan\u00e7ado em k=2; percurso validado.\nEstado 0:\n.....\n.###.\n.###.\n.###.\n.....\nEstado 1:\n.....\n.#.#.\n.....\n.#.#.\n.....\nEstado 2:\n.....\n.....\n.....\n.....\n.....\nTeste de controlo SAT em N=3 conclu\u00eddo (se o solver confirmou k=2).\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "nWHF",
+      "code_hash": "22af5d84767e32a0aebe02476c40aab1",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"experiencias-bmc-de-profundidade-reduzida\">Experi\u00eancias BMC de profundidade reduzida</h2>\n<span class=\"paragraph\">Vamos testar <code>N=5</code>, com profundidade m\u00e1xima <code>K=2</code>,\nnas quatro combina\u00e7\u00f5es:</span>\n<ol>\n<li>Simult\u00e2nea, fronteira fixa.</li>\n<li>Simult\u00e2nea, fronteira simb\u00f3lica.</li>\n<li>Individual, fronteira fixa.</li>\n<li>Individual, fronteira simb\u00f3lica.</li>\n</ol>\n<span class=\"paragraph\">Os resultados observados podem depender da modalidade\ne da configura\u00e7\u00e3o inicial.</span>\n<span class=\"paragraph\">Estes testes continuam a ser apenas experi\u00eancias de\ndepura\u00e7\u00e3o e n\u00e3o provas para <code>N &gt; 16</code>.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "iLit",
+      "code_hash": "5eb38ec7e4f91688295947ebbc0a5f62",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "\nModo simultanea | fronteira fixa | N=5, K=2\nUNSAT nas profundidades 0..2: sem contraexemplo neste limite; n\u00e3o \u00e9 prova global.\n\nModo simultanea | fronteira simb\u00f3lica | N=5, K=2\nUNSAT nas profundidades 0..2: sem contraexemplo neste limite; n\u00e3o \u00e9 prova global.\n\nModo individual | fronteira fixa | N=5, K=2\nUNSAT nas profundidades 0..2: sem contraexemplo neste limite; n\u00e3o \u00e9 prova global.\n\nModo individual | fronteira simb\u00f3lica | N=5, K=2\nUNSAT nas profundidades 0..2: sem contraexemplo neste limite; n\u00e3o \u00e9 prova global.\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "ZHCJ",
+      "code_hash": "01e9d15f0601cbc428ce642e90419cc5",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"verificacao-na-dimensao-obrigatoria-n17\">Verifica\u00e7\u00e3o na dimens\u00e3o obrigat\u00f3ria: N=17</h2>\n<span class=\"paragraph\">Come\u00e7amos por uma experi\u00eancia com <code>N=17</code>, <code>K=1</code>,\nfronteira fixa com semente 42 e atualiza\u00e7\u00e3o simult\u00e2nea.</span>\n<span class=\"paragraph\">As outras combina\u00e7\u00f5es est\u00e3o indicadas no c\u00f3digo,\npara serem executadas posteriormente, uma de cada vez.</span>\n<span class=\"paragraph\">N\u00e3o devemos aumentar a profundidade antes de verificar\nos resultados e os tempos de execu\u00e7\u00e3o.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "ROlb",
+      "code_hash": "2a723c19de2525dbb68b7745ebfffd8b",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "UNSAT nas profundidades 0..1: sem contraexemplo neste limite; n\u00e3o \u00e9 prova global.\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "qnkX",
+      "code_hash": "15dd92a968ab5c2484179fa937f3b619",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/markdown": "<span class=\"markdown prose dark:prose-invert contents\"><h2 id=\"limitacoes-e-reproducao\">Limita\u00e7\u00f5es e reprodu\u00e7\u00e3o</h2>\n<ul>\n<li><code>N=3</code> e <code>N=5</code> servem apenas para depura\u00e7\u00e3o.</li>\n<li>A dimens\u00e3o m\u00ednima v\u00e1lida \u00e9 <code>N=17</code>.</li>\n<li><code>UNSAT</code> at\u00e9 <code>K</code> n\u00e3o prova que o erro nunca ser\u00e1 alcan\u00e7ado.</li>\n<li><code>SAT</code> fornece um contraexemplo, que deve ser validado.</li>\n<li>Uma fronteira fixa com semente representa apenas uma\n  configura\u00e7\u00e3o inicial.</li>\n<li>A fronteira simb\u00f3lica considera todas as configura\u00e7\u00f5es\n  poss\u00edveis, sem lhes atribuir probabilidades.</li>\n<li>As vers\u00f5es das ferramentas, par\u00e2metros e resultados reais\n  devem ser registados ap\u00f3s a execu\u00e7\u00e3o.</li>\n</ul>\n<span class=\"paragraph\"><strong>Contribui\u00e7\u00e3o da LLM:</strong></span>\n<ul>\n<li>Formaliza\u00e7\u00e3o e implementa\u00e7\u00e3o da FSM.</li>\n<li>Constru\u00e7\u00e3o das rela\u00e7\u00f5es de transi\u00e7\u00e3o.</li>\n<li>Predicado de erro e BMC.</li>\n<li>Extra\u00e7\u00e3o e valida\u00e7\u00e3o independente dos contraexemplos.</li>\n<li>Testes e organiza\u00e7\u00e3o das c\u00e9lulas Marimo.</li>\n</ul>\n<span class=\"paragraph\">A solu\u00e7\u00e3o e os resultados devem ser revistos pelos alunos,\ne a liga\u00e7\u00e3o para o di\u00e1logo com a LLM deve acompanhar\na entrega do trabalho.</span>\n<span class=\"paragraph\"><strong>Pr\u00f3xima etapa:</strong> ap\u00f3s validar este BMC, discutir\nindu\u00e7\u00e3o e k-indu\u00e7\u00e3o para a primeira propriedade.</span></span>"
+          }
+        }
+      ],
+      "console": []
+    }
+  ]
+}
