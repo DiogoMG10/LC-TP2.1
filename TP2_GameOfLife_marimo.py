@@ -830,12 +830,15 @@ def _(mo):
     return
 
 
+
 @app.cell
 def _(mo):
     def _render_medicoes():
-        # Dados experimentais observados localmente; organização assistida pelo ChatGPT.
         from statistics import median
+        from html import escape
 
+        # Resultados experimentais observados localmente.
+        # Organização e apresentação assistidas pelo ChatGPT.
         MEDICOES = """
         FSM|17|S|SAT|10.0,42.3,52.3;10.1,37.9,48.0;10.8,37.0,47.8
         FSM|17|I|SAT|11.1,68.6,79.7;10.4,59.6,70.1;15.7,57.0,72.6
@@ -854,32 +857,130 @@ def _(mo):
         Laço P2|17|S|SAT|159.7,185.5,345.2;164.3,208.2,372.5;150.5,178.0,328.4
         Laço P2|17|I|SAT|38.0,61.5,99.5;55.0,66.5,121.5;425.2,77.8,503.0
         """
+
+        # Extrair os 48 registos individuais.
         dados = []
+
         for linha in MEDICOES.strip().splitlines():
-            metodo, N, modo, estado, medicoes = linha.strip().split("|")
-            for repeticao, tripleto in enumerate(medicoes.split(";"), 1):
-                c, z, total = [float(x) for x in tripleto.split(",")]
-                dados.append((metodo, int(N), modo, repeticao, c, z, total, estado))
+            metodo, N, modo, estado, medicoes = (
+                linha.strip().split("|")
+            )
+
+            for repeticao, triplo in enumerate(
+                medicoes.split(";"), 1
+            ):
+                construcao, solver, total = [
+                    float(x) for x in triplo.split(",")
+                ]
+
+                dados.append((
+                    metodo, int(N), modo, repeticao,
+                    construcao, solver, total, estado
+                ))
+
         assert len(dados) == 48
 
-        bruto = ["| Método | N | Modo | Rep. | Construção | Z3 | Total | Estado |",
-                 "|:--|--:|:--:|--:|--:|--:|--:|:--:|"]
-        for metodo, N, modo, rep, c, z, total, estado in dados:
-            bruto.append(f"| {metodo} | {N} | {modo} | {rep} | {c:.1f} | {z:.1f} | {total:.1f} | {estado} |")
+        # Preparar a tabela das medições individuais.
+        cabecalho_bruto = [
+            "Método", "N", "Modo", "Rep.",
+            "Construção", "Z3", "Total", "Estado"
+        ]
 
-        grupos = list(dict.fromkeys((r[0], r[1], r[2], r[7]) for r in dados))
-        resumo = ["| Método | N | Modo | Construção med. | Z3 med. | Total med. | Estado |",
-                  "|:--|--:|:--:|--:|--:|--:|--:|:--:|"]
-        for met, N, modo, estado in grupos:
-            valores = [r for r in dados if (r[0], r[1], r[2], r[7]) == (met, N, modo, estado)]
-            resumo.append(f"| {met} | {N} | {modo} | {median(r[4] for r in valores):.1f} | "
-                          f"{median(r[5] for r in valores):.1f} | {median(r[6] for r in valores):.1f} | {estado} |")
+        linhas_bruto = [
+            [
+                metodo, N, modo, rep,
+                f"{c:.1f}", f"{z:.1f}",
+                f"{total:.1f}", estado
+            ]
+            for metodo, N, modo, rep, c, z, total, estado
+            in dados
+        ]
 
-        return ("### 6.1. Medições individuais (ms)\n\n" + "\n".join(bruto)
-                + "\n\n### 6.2. Medianas (ms)\n\n" + "\n".join(resumo)
-                + "\n\n*S = simultânea; I = individual. As medianas das parcelas são calculadas independentemente da mediana total.*")
+        # Calcular as medianas separadamente por métrica.
+        grupos = list(dict.fromkeys(
+            (r[0], r[1], r[2], r[7]) for r in dados
+        ))
 
-    mo.md(_render_medicoes())
+        assert len(grupos) == 16
+
+        cabecalho_resumo = [
+            "Método", "N", "Modo",
+            "Construção med.", "Z3 med.",
+            "Total med.", "Estado"
+        ]
+
+        linhas_resumo = []
+
+        for metodo, N, modo, estado in grupos:
+            valores = [
+                r for r in dados
+                if (r[0], r[1], r[2], r[7])
+                == (metodo, N, modo, estado)
+            ]
+
+            linhas_resumo.append([
+                metodo,
+                N,
+                modo,
+                f"{median(r[4] for r in valores):.1f}",
+                f"{median(r[5] for r in valores):.1f}",
+                f"{median(r[6] for r in valores):.1f}",
+                estado
+            ])
+
+        # Gerar tabelas HTML para apresentação e exportação.
+        def tabela_html(cabecalho, linhas):
+            estilo_tabela = (
+                "border-collapse:collapse;"
+                "width:100%;font-size:0.85em;"
+            )
+            estilo_celula = (
+                "padding:5px 8px;"
+                "border-bottom:1px solid #ddd;"
+                "text-align:left;"
+            )
+
+            html = (
+                f'<table style="{estilo_tabela}">'
+                "<thead><tr>"
+            )
+
+            for coluna in cabecalho:
+                html += (
+                    f'<th style="{estilo_celula}">'
+                    f'{escape(str(coluna))}</th>'
+                )
+
+            html += "</tr></thead><tbody>"
+
+            for linha in linhas:
+                html += "<tr>"
+
+                for valor in linha:
+                    html += (
+                        f'<td style="{estilo_celula}">'
+                        f'{escape(str(valor))}</td>'
+                    )
+
+                html += "</tr>"
+
+            html += "</tbody></table>"
+
+            return mo.Html(html)
+
+        return mo.vstack([
+            mo.md("### 6.1. Medições individuais (ms)"),
+            tabela_html(cabecalho_bruto, linhas_bruto),
+            mo.md("### 6.2. Medianas (ms)"),
+            tabela_html(cabecalho_resumo, linhas_resumo),
+            mo.md(
+                "*S = simultânea; I = individual. "
+                "As medianas das parcelas são calculadas "
+                "independentemente da mediana total.*"
+            )
+        ])
+
+    _render_medicoes()
     return
 
 
