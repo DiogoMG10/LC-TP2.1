@@ -353,7 +353,7 @@ def _(And, Not, declare, error, trans, bmc_erro, SolverSMT):
                     + [error(X[k], N)])
         if fronteira is not None:
             # Restringe a fronteira sem impor acessibilidade ao estado inicial do passo.
-            formulas += [X[0][p] if v else Not(X[0][p]) for p in fronteira.items()]
+            formulas += [X[0][p] if v else Not(X[0][p]) for p, v in fronteira.items()]
         return And(formulas), X
 
     def k_inducao(N, modo, k, fronteira=None):
