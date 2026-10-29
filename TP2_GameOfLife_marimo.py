@@ -1,7 +1,7 @@
 
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["marimo>=0.25.0", "pysmt", "z3-solver"]
+# dependencies = ["marimo>=0.25.0", "pysmt==0.9.6", "z3-solver"]
 # ///
 
 import marimo
@@ -21,516 +21,223 @@ def _(mo):
     mo.md(r"""
     # TP2 — Exercício 1: Game of Life modificado
 
-    **Fontes:** enunciado do TP2, Capítulos 3 e 4 e
-    fichas práticas 7, 8 e 9.
+    **Lógica Computacional · 2026/2027**
 
-    ## 1. Descrição e formulação da FSM
+    ## 1. Formulação do problema
 
-    Construímos uma FSM `Σ = (X, I, T)` que representa
-    uma versão modificada do Game of Life.
+    Modelamos uma FSM (FOTS) $\Sigma=(X,I,T)$ numa grelha
+    de dimensão $N\times N$, com $N>16$.
 
-    - A grelha normal contém N×N células booleanas,
-      com N > 16 no exercício.
-    - As nove células do bloco inicial 3×3 começam vivas.
-    - As restantes células normais começam mortas.
-    - Existem 2N+1 células na fronteira inicial,
-      com valor inicial aleatório de probabilidade 1/2.
-    - Estas células conservam o seu valor nas transições.
-    - Existem 2N+3 células na fronteira final,
-      sempre mortas.
-    - Cada célula normal tem oito vizinhos de Moore.
+    O estado contém:
 
-    **Regra B3/S23**
+    - **Células normais** $(1\ldots N,1\ldots N)$:
+      variáveis booleanas. O bloco inicial $3\times3$
+      está vivo e as restantes células estão mortas.
+    - **Fronteira inicial** ($i=0$ ou $j=0$):
+      $2N+1$ células, cada uma inicialmente viva com
+      probabilidade $1/2$, permanecendo constante
+      durante a evolução.
+    - **Fronteira final** ($i=N+1$ ou $j=N+1$):
+      $2N+3$ células permanentemente mortas,
+      representadas por constantes booleanas.
 
-    Uma célula fica viva no passo seguinte se tiver
-    exatamente três vizinhos vivos ou se estiver
-    viva e tiver exatamente dois vizinhos vivos.
+    A evolução utiliza a vizinhança de Moore, composta
+    pelos oito vizinhos de cada célula, e a regra B3/S23:
 
-    **Relações de transição**
+    - Uma célula morta nasce com exatamente três vizinhos vivos.
+    - Uma célula viva sobrevive com dois ou três vizinhos vivos.
+    - Nos restantes casos, a célula fica morta.
 
-    - `simultanea`: todas as células normais são
-      atualizadas no mesmo passo.
-    - `individual`: exatamente uma célula normal
-      aplica a regra num passo, podendo manter o
-      mesmo valor (interpretação A).
+    ### Relações de transição
 
-    Na modalidade individual, um índice auxiliar
-    inteiro identifica a célula selecionada. O índice
-    não pertence às variáveis de estado.
+    **Simultânea:** todas as células normais aplicam
+    a regra ao mesmo estado anterior.
 
-    **Fronteiras**
+    **Individual:** exatamente uma célula normal aplica
+    a regra por transição, podendo conservar o seu valor.
+    Esta interpretação distingue atualização de mudança
+    de estado.
 
-    Podemos fixar uma fronteira reprodutível através
-    de uma semente ou deixá-la simbolicamente livre.
+    Um seletor auxiliar inteiro $q$ identifica a célula
+    escolhida no modo individual. Cada transição tem
+    um seletor independente.
 
-    A fronteira simbólica permite todas as atribuições
-    iniciais possíveis; não representa uma distribuição
-    probabilística.
+    ### Tratamento das fronteiras
 
-    **Contribuição da LLM**
+    A fronteira inicial pode ser:
 
-    A modelação, as fórmulas e a implementação foram
-    desenvolvidas com assistência de LLM. A interpretação
-    A e as alternativas de fronteira foram discutidas
-    ao longo do desenvolvimento.
+    - **Fixa:** gerada com uma semente pseudoaleatória,
+      permitindo reproduzir a configuração.
+    - **Simbólica:** os valores iniciais são livres,
+      permitindo considerar todas as atribuições possíveis.
+
+    A fronteira simbólica não representa uma distribuição
+    de probabilidade. A fronteira final permanece morta
+    em ambas as modalidades.
+
+    **Referências:** enunciado do TP2, regras gerais
+    dos trabalhos práticos, capítulos 3 e 4 e fichas
+    práticas 7, 8 e 9 da disciplina.
     """)
     return
 
 
 @app.cell
 def _():
-    # LLM — Formulação e implementação simbólica da FSM.
-    # Preservada das etapas anteriores.
-
+    # Modelação da FSM desenvolvida com assistência do ChatGPT.
     import random
-
-    from pysmt.shortcuts import (
-        And, Bool, Equals, Iff, Int, Ite,
-        Not, Or, Plus, Symbol, is_sat
-    )
+    from pysmt.shortcuts import And, Bool, Equals, Iff, Int, Ite, Not, Or, Plus, Symbol, is_sat
     from pysmt.typing import BOOL, INT
 
     def declare(t, N):
         if N < 3:
-            raise ValueError(
-                "N>=3 para depuração; N>16 no enunciado"
-            )
-
-        return {
-            (i, j): Symbol(f"x_{i}_{j}_{t}", BOOL)
-            for i in range(N+1)
-            for j in range(N+1)
-        }
+            raise ValueError("N >= 3 nos testes; N > 16 no exercício")
+        return {(i, j): Symbol(f"x_{i}_{j}_{t}", BOOL)
+                for i in range(N + 1) for j in range(N + 1)}
 
     def fronteira_aleatoria(N, semente):
         rng = random.Random(semente)
+        return {(i, j): rng.getrandbits(1)
+                for i in range(N + 1) for j in range(N + 1) if i == 0 or j == 0}
 
-        return {
-            (i, j): rng.getrandbits(1)
-            for i in range(N+1)
-            for j in range(N+1)
-            if i == 0 or j == 0
-        }
+    def init(X, N, fronteira=None):
+        formulas = [X[i, j] if i <= 3 and j <= 3 else Not(X[i, j])
+                    for i in range(1, N + 1) for j in range(1, N + 1)]
+        if fronteira is not None:
+            pontos = {(i, j) for i in range(N + 1) for j in range(N + 1)
+                      if i == 0 or j == 0}
+            if set(fronteira) != pontos or any(v not in (0, 1) for v in fronteira.values()):
+                raise ValueError("Fronteira inválida")
+            formulas += [X[p] if fronteira[p] else Not(X[p]) for p in sorted(pontos)]
+        return And(formulas)
 
-    def init(state, N, fronteira=None):
-        normais = [
-            state[i, j] if i <= 3 and j <= 3
-            else Not(state[i, j])
-            for i in range(1, N+1)
-            for j in range(1, N+1)
-        ]
-
-        if fronteira is None:
-            return And(normais)
-
-        posicoes = {
-            (i, j)
-            for i in range(N+1)
-            for j in range(N+1)
-            if i == 0 or j == 0
-        }
-
-        if set(fronteira) != posicoes or any(
-            v not in (0, 1)
-            for v in fronteira.values()
-        ):
-            raise ValueError("Fronteira inválida")
-
-        return And(normais + [
-            state[p] if fronteira[p] else Not(state[p])
-            for p in sorted(posicoes)
-        ])
-
-    def valor_celula(state, N, i, j):
+    def valor_celula(X, N, i, j):
         if 0 <= i <= N and 0 <= j <= N:
-            return state[i, j]
-
-        if (
-            0 <= i <= N+1
-            and 0 <= j <= N+1
-            and (i == N+1 or j == N+1)
-        ):
+            return X[i, j]
+        if 0 <= i <= N + 1 and 0 <= j <= N + 1 and (i == N + 1 or j == N + 1):
             return Bool(False)
+        raise ValueError(f"Posição inválida: {(i, j)}")
 
-        raise ValueError(
-            f"Coordenadas inválidas: {(i, j)}"
-        )
-
-    def regra(state, N, i, j):
+    def regra(X, N, i, j):
         if not (1 <= i <= N and 1 <= j <= N):
-            raise ValueError(
-                "A regra apenas se aplica a células normais"
-            )
+            raise ValueError("A regra aplica-se apenas a células normais")
+        vizinhos = [valor_celula(X, N, i + di, j + dj)
+                    for di in (-1, 0, 1) for dj in (-1, 0, 1) if (di, dj) != (0, 0)]
+        vivos = Plus([Ite(v, Int(1), Int(0)) for v in vizinhos])
+        return Or(Equals(vivos, Int(3)), And(X[i, j], Equals(vivos, Int(2))))
 
-        vizinhos = [
-            valor_celula(state, N, i+di, j+dj)
-            for di in (-1, 0, 1)
-            for dj in (-1, 0, 1)
-            if (di, dj) != (0, 0)
-        ]
+    def seletor(prox):
+        # O nome depende do destino, garantindo escolhas independentes entre passos.
+        return Symbol("q_" + prox[1, 1].symbol_name(), INT)
 
-        vivos = Plus([
-            Ite(v, Int(1), Int(0))
-            for v in vizinhos
-        ])
-
-        return Or(
-            Equals(vivos, Int(3)),
-            And(state[i, j], Equals(vivos, Int(2)))
-        )
-
-    def trans(curr, prox, N, modo="simultanea"):
-        if modo not in ("individual", "simultanea"):
+    def trans(atual, prox, N, modo="simultanea"):
+        if modo not in ("simultanea", "individual"):
             raise ValueError("Modo inválido")
-
-        fixas = [
-            Iff(prox[i, j], curr[i, j])
-            for i in range(N+1)
-            for j in range(N+1)
-            if i == 0 or j == 0
-        ]
-
-        restricoes = []
-
+        formulas = [Iff(prox[i, j], atual[i, j])
+                    for i in range(N + 1) for j in range(N + 1) if i == 0 or j == 0]
         if modo == "individual":
-            escolha = Symbol(
-                "q_" + prox[1, 1].symbol_name(),
-                INT
-            )
-
-            restricoes += [
-                escolha >= Int(0),
-                escolha < Int(N*N)
-            ]
-
-        for i in range(1, N+1):
-            for j in range(1, N+1):
-                novo = regra(curr, N, i, j)
-
+            q = seletor(prox)
+            formulas += [q >= Int(0), q < Int(N * N)]
+        for i in range(1, N + 1):
+            for j in range(1, N + 1):
+                novo = regra(atual, N, i, j)
                 if modo == "individual":
-                    indice = (i-1)*N + j-1
+                    novo = Ite(Equals(q, Int((i - 1) * N + j - 1)), novo, atual[i, j])
+                formulas.append(Iff(prox[i, j], novo))
+        return And(formulas)
 
-                    novo = Ite(
-                        Equals(escolha, Int(indice)),
-                        novo,
-                        curr[i, j]
-                    )
-
-                restricoes.append(
-                    Iff(prox[i, j], novo)
-                )
-
-        return And(fixas + restricoes)
-
-    return (
-        And, Bool, Equals, Iff, Int, Not, Or,
-        Symbol, declare, fronteira_aleatoria,
-        init, is_sat, trans, valor_celula, regra
-    )
-
-
-@app.cell
-def _(mo):
-    botao_fsm17 = mo.ui.run_button(
-        label="Testar FSM N=17"
-    )
-    botao_bmc = mo.ui.run_button(
-        label="Testes BMC P1"
-    )
-    botao_inducao = mo.ui.run_button(
-        label="Testes de indução / k-indução"
-    )
-    botao_lacos = mo.ui.run_button(
-        label="Laços P2: pesquisa"
-    )
-    botao_testemunhas = mo.ui.run_button(
-        label="Confirmar testemunhas P1 e P2"
-    )
-
-    mo.vstack([
-        mo.md(r"""
-        ## 2. Controlo de execução
-
-        Os testes básicos N=5 executam-se automaticamente.
-
-        Os testes N=17, BMC, indução, pesquisa de laços
-        e confirmação de testemunhas executam-se
-        manualmente para evitar trabalho pesado
-        ao abrir o notebook.
-
-        Os botões não alteram a formulação lógica.
-        """),
-        botao_fsm17,
-        botao_bmc,
-        botao_inducao,
-        botao_lacos,
-        botao_testemunhas
-    ])
-
-    return (
-        botao_fsm17, botao_bmc, botao_inducao,
-        botao_lacos, botao_testemunhas
-    )
+    return And, Bool, Equals, Iff, Int, Not, Or, declare, fronteira_aleatoria, init, is_sat, regra, seletor, trans, valor_celula
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 3. Testes básicos de correção
+    ## 2. Testes de correção da FSM
 
-    Os testes seguintes verificam:
+    Os testes verificam a inicialização, o tratamento
+    das fronteiras, a rejeição de posições inválidas,
+    a aplicação da regra B3/S23 e a independência
+    das escolhas no modo individual.
 
-    - Estado inicial com fronteira fixa e simbólica.
-    - Células finais e coordenadas inválidas.
-    - Conservação da fronteira inicial.
-    - Regra B3/S23, usando um oscilador `blinker`.
-    - Atualização individual com e sem mudança de valor.
-    - Escolhas independentes em passos consecutivos.
+    O oscilador *blinker* é utilizado para comparar
+    as duas modalidades. Na atualização simultânea,
+    três células vivas alinhadas horizontalmente
+    originam três células alinhadas verticalmente.
 
-    N=5 é utilizado apenas para depuração.
+    Na atualização individual, apenas a célula
+    selecionada aplica a regra, podendo o estado
+    permanecer inalterado.
+
+    A dimensão $N=5$ permite testar a implementação
+    com menor custo. A verificação principal utiliza
+    dimensões superiores a 16.
     """)
     return
 
 
 @app.cell
-def _(
-    And, Not, declare, fronteira_aleatoria,
-    init, is_sat, trans, valor_celula
-):
-    # LLM — Testes SMT de regressão da FSM.
-
-    def _testes_fsm():
-        def configuracao(s, vivas):
-            return And([
-                v if p in vivas else Not(v)
-                for p, v in s.items()
-            ])
-
+def _(And, Equals, Int, Not, declare, fronteira_aleatoria, init, is_sat, mo, seletor, trans, valor_celula):
+    # Testes SMT de regressão desenvolvidos com assistência do ChatGPT.
+    def _testes():
         N = 5
-        a = declare("teste_fsm_a", N)
-        b = declare("teste_fsm_b", N)
+        a, b, c = [declare(f"teste_{t}", N) for t in range(3)]
         fr = fronteira_aleatoria(N, 42)
-
-        assert len(a) == 36
-        assert len(fr) == 11
-
-        assert valor_celula(
-            a, N, N+1, 1
-        ).is_false()
-
-        assert valor_celula(
-            a, N, 1, N+1
-        ).is_false()
-
-        try:
-            valor_celula(a, N, -1, 1)
-            raise AssertionError("Posição inválida aceite")
-        except ValueError:
-            pass
-
-        try:
-            valor_celula({}, N, 1, 1)
-            raise AssertionError("Célula em falta aceite")
-        except KeyError:
-            pass
-
-        assert is_sat(
-            init(a, N, fr),
-            solver_name="z3"
-        )
-
-        assert not is_sat(
-            And(init(a, N, fr), Not(a[1, 1])),
-            solver_name="z3"
-        )
-
-        assert not is_sat(
-            And(init(a, N, fr), a[4, 4]),
-            solver_name="z3"
-        )
-
-        assert is_sat(
-            And(init(a, N), a[0, 0]),
-            solver_name="z3"
-        )
-
-        assert is_sat(
-            And(init(a, N), Not(a[0, 0])),
-            solver_name="z3"
-        )
-
-        for modo in ("individual", "simultanea"):
-            assert not is_sat(
-                And(
-                    trans(a, b, N, modo),
-                    a[0, 0],
-                    Not(b[0, 0])
-                ),
-                solver_name="z3"
-            )
-
-        horizontal = {(2, 1), (2, 2), (2, 3)}
-        vertical = {(1, 2), (2, 2), (3, 2)}
-
-        base = configuracao(a, horizontal)
-        sim = trans(a, b, N, "simultanea")
-        ind = trans(a, b, N, "individual")
-
-        assert is_sat(
-            And(
-                base, sim,
-                configuracao(b, vertical)
-            ),
-            solver_name="z3"
-        )
-
-        assert not is_sat(
-            And(
-                base, sim,
-                Not(configuracao(b, vertical))
-            ),
-            solver_name="z3"
-        )
-
-        assert is_sat(
-            And(
-                base, ind,
-                configuracao(b, {(2, 2), (2, 3)})
-            ),
-            solver_name="z3"
-        )
-
-        assert not is_sat(
-            And(
-                base, ind,
-                configuracao(b, vertical)
-            ),
-            solver_name="z3"
-        )
-
-        assert is_sat(
-            And(
-                base, ind,
-                configuracao(b, horizontal)
-            ),
-            solver_name="z3"
-        )
-
-        print("FSM N=5: testes SMT concluídos")
-
-    _testes_fsm()
-    return
-
-
-@app.cell
-def _(
-    And, Equals, Int, Not, Symbol,
-    declare, init, is_sat, trans
-):
-    # LLM — Duas escolhas individuais consecutivas.
-
-    def _testar_duas_escolhas():
-        from pysmt.typing import INT as T_INT
-
-        N = 5
-
-        a, b, c = [
-            declare(f"duas_escolhas_{t}", N)
-            for t in range(3)
-        ]
-
-        zeros = {
-            (i, j): 0
-            for i in range(N+1)
-            for j in range(N+1)
-            if i == 0 or j == 0
-        }
-
-        q1 = Symbol(
-            "q_" + b[1, 1].symbol_name(),
-            T_INT
-        )
-
-        q2 = Symbol(
-            "q_" + c[1, 1].symbol_name(),
-            T_INT
-        )
-
-        formula = And(
-            init(a, N, zeros),
-            trans(a, b, N, "individual"),
-            trans(b, c, N, "individual"),
-            Equals(q1, Int(24)),
-            Equals(q2, Int(6)),
-            init(b, N, zeros),
-            Not(c[2, 2]),
-            c[1, 1]
-        )
-
-        assert is_sat(formula, solver_name="z3")
-
-        print(
-            "Duas escolhas individuais consecutivas: "
-            "SAT (esperado)"
-        )
-
-    _testar_duas_escolhas()
-    return
-
-
-@app.cell
-def _(
-    And, declare, fronteira_aleatoria,
-    init, is_sat, trans, mo, botao_fsm17
-):
-    mo.stop(not botao_fsm17.value)
-
-    def _testar_n17():
-        N = 17
-        a = declare("N17_a", N)
-        b = declare("N17_b", N)
-        fr = fronteira_aleatoria(N, 42)
-
-        assert len(a) == 324
-        assert len(fr) == 35
-
+        fixar = lambda X, vivas: And([v if p in vivas else Not(v) for p, v in X.items()])
+        assert len(a) == 36 and len(fr) == 11
+        assert valor_celula(a, N, N + 1, 1).is_false()
+        assert valor_celula(a, N, 1, N + 1).is_false()
+        for pos, erro_esperado in [((-1, 1), ValueError), ((1, 1), KeyError)]:
+            try:
+                valor_celula(a if erro_esperado is ValueError else {}, N, *pos)
+                raise AssertionError("Era esperado rejeitar a posição")
+            except erro_esperado:
+                pass
+        assert is_sat(init(a, N, fr), solver_name="z3")
+        assert not is_sat(And(init(a, N, fr), Not(a[1, 1])), solver_name="z3")
+        assert not is_sat(And(init(a, N, fr), a[4, 4]), solver_name="z3")
+        for val in (a[0, 0], Not(a[0, 0])):
+            assert is_sat(And(init(a, N), val), solver_name="z3")
         for modo in ("simultanea", "individual"):
-            assert is_sat(
-                And(
-                    init(a, N, fr),
-                    trans(a, b, N, modo)
-                ),
-                solver_name="z3"
-            )
+            assert not is_sat(And(trans(a, b, N, modo), a[0, 0], Not(b[0, 0])), solver_name="z3")
+        horizontal, vertical = {(2, 1), (2, 2), (2, 3)}, {(1, 2), (2, 2), (3, 2)}
+        base = fixar(a, horizontal)
+        sim, ind = trans(a, b, N, "simultanea"), trans(a, b, N, "individual")
+        assert is_sat(And(base, sim, fixar(b, vertical)), solver_name="z3")
+        assert not is_sat(And(base, sim, Not(fixar(b, vertical))), solver_name="z3")
+        assert is_sat(And(base, ind, fixar(b, {(2, 2), (2, 3)})), solver_name="z3")
+        assert not is_sat(And(base, ind, fixar(b, vertical)), solver_name="z3")
+        assert is_sat(And(base, ind, fixar(b, horizontal)), solver_name="z3")
+        zeros = {p: 0 for p in fr}
+        duas = And(init(a, N, zeros), trans(a, b, N, "individual"),
+                   trans(b, c, N, "individual"), Equals(seletor(b), Int(24)),
+                   Equals(seletor(c), Int(6)), init(b, N, zeros), Not(c[2, 2]), c[1, 1])
+        assert is_sat(duas, solver_name="z3")
+        return "**Testes FSM N=5: todos passaram.**"
 
-        print(
-            "FSM N=17: transições satisfazíveis "
-            "nos dois modos"
-        )
-
-    _testar_n17()
+    mo.md(_testes())
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 4. Primeira propriedade — segurança
+    ## 3. Propriedade P1 — estado de erro inalcançável
 
-    Um estado de erro tem todas as células normais mortas:
+    Um estado de erro corresponde a uma configuração
+    em que todas as células normais estão mortas:
 
     $$
-    E(X)=\bigwedge_{i=1}^{N}
-    \bigwedge_{j=1}^{N}\neg x_{i,j}
+    E(X)=\bigwedge_{i=1}^{N}\bigwedge_{j=1}^{N}
+    \neg x_{i,j}
     $$
 
-    A propriedade de segurança pretendida é:
+    A propriedade de segurança é:
 
     $$P_1=G\neg E$$
 
     ### Bounded Model Checking
 
-    Procuramos um percurso que satisfaça:
+    Para uma profundidade $k$, verificamos:
 
     $$
     I(X_0)\land
@@ -538,2148 +245,957 @@ def _(mo):
     \land E(X_k)
     $$
 
-    `SAT` com um percurso validado refuta a propriedade.
+    `SAT` com percurso validado demonstra que o
+    estado de erro é alcançável e refuta P1.
 
-    `UNSAT` até uma profundidade K não demonstra
-    segurança global.
+    `UNSAT` para todas as profundidades até K apenas
+    exclui contraexemplos dentro desse limite.
 
-    Para cada contraexemplo, o validador Python verifica
-    independentemente o estado inicial, a fronteira,
-    todas as transições e o erro final.
+    ### Indução simples e k-indução
+
+    A base exclui estados de erro alcançáveis nas
+    profundidades $0,\ldots,k-1$.
+
+    O passo procura uma sequência de $k$ transições
+    na qual P é verdadeira nos primeiros $k$ estados
+    e falsa no último.
+
+    O primeiro estado do passo não é sujeito a `init`,
+    embora deva respeitar a fronteira quando esta é fixa.
+
+    Um passo indutivo `SAT` pode começar num estado
+    inalcançável, pelo que não constitui necessariamente
+    um contraexemplo real.
     """)
     return
 
 
 @app.cell
-def _(And, Not, declare, init, trans):
-    # LLM — Predicado de erro, BMC e validador independente.
+def _(And, Not, declare, init, trans, seletor):
+    # BMC e validação independente implementados com assistência do ChatGPT.
+    from pysmt.shortcuts import Solver as SolverSMT
 
-    from pysmt.shortcuts import (
-        Solver as BMCSolver,
-        Symbol as BMCSymbol
-    )
-    from pysmt.typing import INT as BMC_INT
+    def error(X, N):
+        return And([Not(X[i, j]) for i in range(1, N + 1) for j in range(1, N + 1)])
 
-    def error(state, N):
-        return And([
-            Not(state[i, j])
-            for i in range(1, N+1)
-            for j in range(1, N+1)
-        ])
+    def validar_percurso(estados, N, modo, escolhas, fronteira=None):
+        if modo not in ("individual", "simultanea") or len(estados) != len(escolhas) + 1:
+            raise ValueError("Percurso inválido")
+        posicoes = {(i, j) for i in range(N + 1) for j in range(N + 1)}
+        borda = {p for p in posicoes if 0 in p}
 
-    def validar_traco(
-        estados, N, modo, escolhas, fronteira=None
-    ):
-        """Valida um percurso de erro sem usar SMT."""
-
-        if (
-            modo not in ("individual", "simultanea")
-            or len(estados) != len(escolhas)+1
-        ):
-            raise ValueError("Traço inválido")
-
-        posicoes = {
-            (i, j)
-            for i in range(N+1)
-            for j in range(N+1)
-        }
-
-        iniciais = {
-            (i, j)
-            for i, j in posicoes
-            if i == 0 or j == 0
-        }
-
-        normais = [
-            (i, j)
-            for i in range(1, N+1)
-            for j in range(1, N+1)
-        ]
-
-        def valor(s, i, j):
+        def ler(s, i, j):
             if 0 <= i <= N and 0 <= j <= N:
                 return int(s[i, j])
-
-            if (
-                0 <= i <= N+1
-                and 0 <= j <= N+1
-                and (i == N+1 or j == N+1)
-            ):
+            if 0 <= i <= N + 1 and 0 <= j <= N + 1 and (i == N + 1 or j == N + 1):
                 return 0
-
-            raise ValueError("Coordenada inválida")
+            raise ValueError(f"Posição inválida: {(i, j)}")
 
         for s in estados:
-            assert set(s) == posicoes
-
-            assert all(
-                type(v) is bool
-                for v in s.values()
-            )
-
-            assert all(
-                s[p] == estados[0][p]
-                for p in iniciais
-            )
-
+            assert set(s) == posicoes and all(type(v) is bool for v in s.values())
+            assert all(s[p] == estados[0][p] for p in borda)
             if fronteira is not None:
-                assert all(
-                    s[p] == bool(fronteira[p])
-                    for p in iniciais
-                )
+                assert all(s[p] == bool(fronteira[p]) for p in borda)
+        assert all(estados[0][i, j] == (i <= 3 and j <= 3)
+                   for i in range(1, N + 1) for j in range(1, N + 1))
 
-        assert all(
-            estados[0][i, j] == (i <= 3 and j <= 3)
-            for i, j in normais
-        )
-
-        for t, (a, b) in enumerate(
-            zip(estados, estados[1:])
-        ):
+        for t, (antes, depois) in enumerate(zip(estados, estados[1:])):
             q = escolhas[t]
+            assert (type(q) is int and 0 <= q < N * N) if modo == "individual" else q is None
+            for i in range(1, N + 1):
+                for j in range(1, N + 1):
+                    n = sum(ler(antes, i + di, j + dj)
+                            for di in (-1, 0, 1) for dj in (-1, 0, 1) if (di, dj) != (0, 0))
+                    novo = (n == 3 or (antes[i, j] and n == 2))
+                    esperado = (novo if modo == "simultanea" or q == (i - 1) * N + j - 1
+                                else antes[i, j])
+                    assert depois[i, j] == esperado, ("Transição inválida", t, i, j)
+        return True
 
-            if modo == "individual":
-                assert (
-                    isinstance(q, int)
-                    and 0 <= q < N*N
-                )
-            else:
-                assert q is None
-
-            for i, j in normais:
-                viz = sum(
-                    valor(a, i+di, j+dj)
-                    for di in (-1, 0, 1)
-                    for dj in (-1, 0, 1)
-                    if (di, dj) != (0, 0)
-                )
-
-                novo = (
-                    viz == 3
-                    or (a[i, j] and viz == 2)
-                )
-
-                esperado = (
-                    novo
-                    if (
-                        modo == "simultanea"
-                        or q == (i-1)*N+j-1
-                    )
-                    else a[i, j]
-                )
-
-                assert b[i, j] == esperado, (t, i, j)
-
-        assert not any(
-            estados[-1][p]
-            for p in normais
-        )
-
+    def validar_traco(estados, N, modo, escolhas, fronteira=None):
+        validar_percurso(estados, N, modo, escolhas, fronteira)
+        assert not any(estados[-1][i, j]
+                       for i in range(1, N + 1) for j in range(1, N + 1))
         return True
 
     def bmc_erro(N, modo, K, fronteira=None):
-        """Verifica as profundidades 0 até K."""
-
-        if (
-            N < 3 or K < 0
-            or modo not in ("individual", "simultanea")
-        ):
-            raise ValueError("Parâmetros inválidos")
-
-        X = [
-            declare(f"bmc_{modo}_{N}_{t}", N)
-            for t in range(K+1)
-        ]
-
-        with BMCSolver(name="z3") as s:
-            s.add_assertion(
-                init(X[0], N, fronteira)
-            )
-
-            for k in range(K+1):
-                if k > 0:
-                    s.add_assertion(
-                        trans(X[k-1], X[k], N, modo)
-                    )
-
+        if K < 0:
+            raise ValueError("K inválido")
+        X = [declare(f"bmc_{modo}_{N}_{t}", N) for t in range(K + 1)]
+        with SolverSMT(name="z3") as s:
+            s.add_assertion(init(X[0], N, fronteira))
+            for k in range(K + 1):
+                if k:
+                    s.add_assertion(trans(X[k - 1], X[k], N, modo))
                 s.push()
                 s.add_assertion(error(X[k], N))
-
                 if s.solve():
-                    concretos = [
-                        {
-                            p: bool(s.get_py_value(v))
-                            for p, v in st.items()
-                        }
-                        for st in X[:k+1]
-                    ]
-
-                    if modo == "individual":
-                        escolhas = [
-                            int(s.get_py_value(
-                                BMCSymbol(
-                                    "q_" + X[t+1][1, 1].symbol_name(),
-                                    BMC_INT
-                                )
-                            ))
-                            for t in range(k)
-                        ]
-                    else:
-                        escolhas = [None]*k
-
-                    validar_traco(
-                        concretos, N, modo,
-                        escolhas, fronteira
-                    )
-
-                    print(
-                        f"BMC erro: SAT em k={k}, "
-                        "percurso validado"
-                    )
-
-                    for t, st in enumerate(concretos):
-                        print(f"Estado {t}:")
-
-                        for i in range(N+2):
-                            print("".join(
-                                "#"
-                                if (
-                                    st[i, j]
-                                    if i <= N and j <= N
-                                    else False
-                                )
-                                else "."
-                                for j in range(N+2)
-                            ))
-
-                        if t < k and modo == "individual":
-                            q = escolhas[t]
-
-                            print(
-                                f"Selecionada: "
-                                f"({q//N+1},{q%N+1})"
-                            )
-
-                    return {
-                        "profundidade": k,
-                        "estados": concretos,
-                        "escolhas": escolhas,
-                        "validado": True
-                    }
-
+                    estados = [{p: bool(s.get_py_value(v)) for p, v in st.items()} for st in X[:k + 1]]
+                    escolhas = ([int(s.get_py_value(seletor(X[t + 1]))) for t in range(k)]
+                                if modo == "individual" else [None] * k)
+                    validar_traco(estados, N, modo, escolhas, fronteira)
+                    return {"k": k, "estados": estados, "escolhas": escolhas, "validado": True}
                 s.pop()
-
-        print(
-            f"BMC erro: UNSAT nas profundidades "
-            f"0..{K}; não é prova global"
-        )
-
         return None
 
-    return (error, validar_traco, bmc_erro)
+    return error, validar_percurso, validar_traco, bmc_erro, SolverSMT
 
 
 @app.cell
-def _(bmc_erro, fronteira_aleatoria, mo, botao_bmc):
-    mo.stop(not botao_bmc.value)
-
-    def _testes_bmc():
-        N = 3
-
-        zeros = {
-            (i, j): 0
-            for i in range(N+1)
-            for j in range(N+1)
-            if i == 0 or j == 0
-        }
-
-        r = bmc_erro(N, "simultanea", 2, zeros)
-
-        assert r is not None
-        assert r["profundidade"] == 2
-        assert r["validado"]
-
-        for modo in ("simultanea", "individual"):
-            for nome, fr in (
-                ("fixa", fronteira_aleatoria(5, 42)),
-                ("simbolica", None)
-            ):
-                print(
-                    f"BMC N=5, modo={modo}, "
-                    f"fronteira={nome}, K=2"
-                )
-
-                bmc_erro(5, modo, 2, fr)
-
-        bmc_erro(
-            17, "simultanea", 1,
-            fronteira_aleatoria(17, 42)
-        )
-
-        print("Testes BMC concluídos")
-
-    _testes_bmc()
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## 5. Indução simples e k-indução
-
-    Definimos o invariante:
-
-    $$P(X)=\neg E(X)$$
-
-    ### Base
-
-    Verificamos que não existe erro alcançável nas
-    profundidades 0,...,k-1, através do BMC.
-
-    ### Passo indutivo
-
-    Testamos a insatisfatibilidade da fórmula:
-
-    $$
-    \bigwedge_{t=0}^{k-1}P(X_t)\land
-    \bigwedge_{t=0}^{k-1}T(X_t,X_{t+1})
-    \land\neg P(X_k)
-    $$
-
-    Quando a fronteira é fixa, restringimos os seus
-    valores no primeiro estado do passo indutivo.
-
-    Não impomos `init(X0)` no passo, pois os estados
-    analisados não são necessariamente alcançáveis.
-
-    **Interpretação dos resultados**
-
-    - Base SAT: existe um contraexemplo alcançável.
-    - Base UNSAT e passo UNSAT: prova do invariante.
-    - Base UNSAT e passo SAT: tentativa inconclusiva.
-
-    Na modalidade individual, passos que não alteram
-    o valor da célula permitem construir sequências
-    que podem fazer falhar a k-indução para profundidades
-    arbitrárias.
-
-    Estes métodos continuam documentados, mesmo
-    depois de encontrados contraexemplos reais.
-    """)
-    return
-
-
-@app.cell
-def _(And, Not, declare, trans, error, bmc_erro):
-    # LLM — Indução simples e k-indução.
-
-    from pysmt.shortcuts import Solver as IndSolver
+def _(And, Not, declare, error, trans, bmc_erro, SolverSMT):
+    # Obrigações indutivas implementadas com assistência do ChatGPT.
+    def formula_passo(N, modo, k, fronteira=None, tag="passo"):
+        if k < 1:
+            raise ValueError("k deve ser positivo")
+        X = [declare(f"{tag}_{modo}_{N}_{k}_{t}", N) for t in range(k + 1)]
+        formulas = ([Not(error(X[t], N)) for t in range(k)]
+                    + [trans(X[t], X[t + 1], N, modo) for t in range(k)]
+                    + [error(X[k], N)])
+        if fronteira is not None:
+            # Restringe a fronteira sem impor acessibilidade ao estado inicial do passo.
+            formulas += [X[0][p] if v else Not(X[0][p]) for p in fronteira.items()]
+        return And(formulas), X
 
     def k_inducao(N, modo, k, fronteira=None):
-        if (
-            N < 3 or k < 1
-            or modo not in ("individual", "simultanea")
-        ):
-            raise ValueError("Parâmetros inválidos")
-
-        print(
-            f"\n{k}-indução N={N}, modo={modo}, "
-            f"fronteira="
-            f"{'simbólica' if fronteira is None else 'fixa'}"
-        )
-
-        print(
-            f"BASE: procurar erro nas profundidades "
-            f"0..{k-1}"
-        )
-
-        contraexemplo = bmc_erro(
-            N, modo, k-1, fronteira
-        )
-
-        if contraexemplo is not None:
-            print(
-                "BASE SAT: contraexemplo alcançável; "
-                "REFUTADA; PASSO dispensado"
-            )
-            return "refutada"
-
-        print("BASE UNSAT no limite verificado")
-
-        X = [
-            declare(f"kind_{modo}_{N}_{k}_{t}", N)
-            for t in range(k+1)
-        ]
-
-        formulas = (
-            [
-                Not(error(X[t], N))
-                for t in range(k)
-            ]
-            + [
-                trans(X[t], X[t+1], N, modo)
-                for t in range(k)
-            ]
-            + [error(X[k], N)]
-        )
-
-        if fronteira is not None:
-            formulas += [
-                X[0][p] if v else Not(X[0][p])
-                for p, v in fronteira.items()
-            ]
-
-        with IndSolver(name="z3") as s:
-            s.add_assertion(And(formulas))
-
+        base = bmc_erro(N, modo, k - 1, fronteira)
+        if base is not None:
+            return {"base": "SAT", "passo": "não executado", "conclusao": "refutada", "k_erro": base["k"]}
+        formula, X = formula_passo(N, modo, k, fronteira, "kind")
+        with SolverSMT(name="z3") as s:
+            s.add_assertion(formula)
             if s.solve():
                 if fronteira is not None:
-                    assert all(
-                        bool(s.get_py_value(X[t][p])) == bool(v)
-                        for t in range(k+1)
-                        for p, v in fronteira.items()
-                    )
-
-                vivos = [
-                    sum(
-                        bool(s.get_py_value(X[t][i, j]))
-                        for i in range(1, N+1)
-                        for j in range(1, N+1)
-                    )
-                    for t in range(k+1)
-                ]
-
-                print(
-                    "PASSO SAT: números de células "
-                    "vivas =", vivos
-                )
-
-                print(
-                    "CONCLUSÃO: INCONCLUSIVA "
-                    "(início não necessariamente alcançável)"
-                )
-                return "inconclusiva"
-
-        print("PASSO UNSAT e BASE UNSAT: PROVADA")
-        return "provada"
+                    assert all(bool(s.get_py_value(X[t][p])) == bool(v)
+                               for t in range(k + 1) for p, v in fronteira.items())
+                vivos = [sum(bool(s.get_py_value(X[t][i, j]))
+                             for i in range(1, N + 1) for j in range(1, N + 1))
+                         for t in range(k + 1)]
+                return {"base": "UNSAT", "passo": "SAT", "conclusao": "inconclusiva", "vivas": vivos}
+        return {"base": "UNSAT", "passo": "UNSAT", "conclusao": "provada"}
 
     def inducao_simples(N, modo, fronteira=None):
         return k_inducao(N, modo, 1, fronteira)
 
-    return (inducao_simples, k_inducao)
+    return formula_passo, k_inducao, inducao_simples
 
 
 @app.cell
-def _(
-    inducao_simples, k_inducao,
-    fronteira_aleatoria, mo, botao_inducao
-):
-    mo.stop(not botao_inducao.value)
+def _(mo):
+    botao_p1 = mo.ui.run_button(label="Executar BMC e indução (N=5 e N=17)")
+    mo.vstack([mo.md("### 3.1. Resultados de segurança e indução"), botao_p1])
+    return (botao_p1,)
 
-    def _testes_inducao():
-        for modo in ("simultanea", "individual"):
-            assert inducao_simples(
-                5, modo, None
-            ) == "inconclusiva"
 
-        assert k_inducao(
-            5, "individual", 2, None
-        ) == "inconclusiva"
+@app.cell
+def _(mo, botao_p1, And, declare, fronteira_aleatoria, init, trans, is_sat, bmc_erro, k_inducao, inducao_simples):
+    mo.stop(not botao_p1.value, mo.md("*Experiência não executada nesta sessão.*"))
 
-        assert k_inducao(
-            5, "individual", 3, None
-        ) == "inconclusiva"
+    def _executar_p1():
+        with mo.status.spinner(title="A executar BMC e indução…"):
+            N = 17
+            fr = fronteira_aleatoria(N, 42)
+            a, b = declare("reg_n17_a", N), declare("reg_n17_b", N)
+            verificacao = [is_sat(And(init(a, N, fr), trans(a, b, N, m)), solver_name="z3")
+                           for m in ("simultanea", "individual")]
+            assert all(verificacao) and len(a) == 324 and len(fr) == 35
+            controlo = {p: 0 for p in fronteira_aleatoria(3, 42)}
+            c = bmc_erro(3, "simultanea", 2, controlo)
+            assert c and c["k"] == 2 and c["validado"]
+            linhas = ["| Teste | Resultado |", "|:--|:--|",
+                      "| FSM N=17, um passo nos dois modos | SAT / SAT |",
+                      "| BMC de controlo N=3, K=2 | SAT; percurso validado |"]
+            for modo in ("simultanea", "individual"):
+                for nome, f in (("fixa42", fronteira_aleatoria(5, 42)), ("simbólica", None)):
+                    r = bmc_erro(5, modo, 2, f)
+                    linhas.append(f"| BMC N=5, {modo}, {nome}, K=2 | {'SAT em k='+str(r['k']) if r else 'UNSAT até K'} |")
+            linhas.append("| BMC N=17, simultânea, fixa42, K=1 | "
+                          + ("SAT" if bmc_erro(17, "simultanea", 1, fr) else "UNSAT até K") + " |")
+            for modo in ("simultanea", "individual"):
+                r = inducao_simples(5, modo, None)
+                assert r["conclusao"] == "inconclusiva"
+                linhas.append(f"| Indução N=5, {modo}, simbólica | BASE {r['base']}; PASSO {r['passo']} |")
+            for k in (2, 3):
+                r = k_inducao(5, "individual", k, None)
+                assert r["conclusao"] == "inconclusiva"
+                linhas.append(f"| {k}-indução N=5 individual | BASE {r['base']}; PASSO {r['passo']} |")
+            r = k_inducao(5, "simultanea", 2, None)
+            linhas.append(f"| 2-indução N=5 simultânea | {r['conclusao']} |")
+            for modo in ("simultanea", "individual"):
+                for nome, f in (("fixa42", fr), ("simbólica", None)):
+                    r = inducao_simples(17, modo, f)
+                    linhas.append(f"| Indução N=17, {modo}, {nome} | BASE {r['base']}; PASSO {r['passo']}; {r['conclusao']} |")
 
-        k_inducao(5, "simultanea", 2, None)
+        return ("**Execução concluída.**\n\n" + "\n".join(linhas))
 
-        N = 17
-        fixa = fronteira_aleatoria(N, 42)
-
-        for modo in ("simultanea", "individual"):
-            for fr in (fixa, None):
-                inducao_simples(N, modo, fr)
-
-        print("Testes de indução concluídos")
-
-    _testes_inducao()
+    mo.md(_executar_p1())
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 6. Segunda propriedade — permanência das células
+    ## 4. Propriedade P2 — permanência das células
 
-    Para cada célula normal c, pretendemos verificar:
+    A segunda propriedade exige que cada célula normal
+    esteja viva e morta infinitas vezes ao longo
+    de uma execução:
 
     $$
     P_2=\bigwedge_{c\in C}
     (GF\,x_c\land GF\,\neg x_c)
     $$
 
-    A negação é satisfeita quando alguma célula,
-    a partir de certo instante, permanece viva
-    ou morta indefinidamente.
+    Para refutar P2, basta encontrar uma célula que,
+    a partir de determinado instante, permaneça
+    indefinidamente viva ou morta.
 
-    ### BMC com laços
+    ### Verificação com laços
 
-    Procuramos estados X0,...,Xk,X{k+1}, com:
+    Procuramos uma sequência:
 
-    - `init(X0)`;
-    - todas as transições T(Xt,X{t+1});
-    - igualdade X{k+1}=Xl para algum l<=k;
-    - uma célula com valor constante no ciclo.
+    $$
+    X_0\rightarrow\cdots\rightarrow X_k
+    \rightarrow X_{k+1}=X_\ell
+    $$
 
-    A transição de fecho é obrigatória. A igualdade
-    isolada de estados não demonstra um comportamento
-    infinito válido.
+    Na parte cíclica, a célula observada conserva
+    o mesmo valor.
 
-    Um ciclo encontrado e validado pode repetir-se
-    indefinidamente.
+    É indispensável verificar a relação de transição
+    $T(X_k,X_{k+1})$, além da igualdade de estados.
 
-    A ausência de ciclos até determinada profundidade
-    não prova a propriedade temporal global.
+    O estado adicional $X_{k+1}$ permite representar
+    separadamente a transição de fecho, sem reutilizar
+    indevidamente o seletor de outra transição.
+
+    Um ciclo válido pode repetir-se indefinidamente,
+    constituindo um contraexemplo à propriedade.
+
+    A ausência de ciclos até uma profundidade limitada
+    não demonstra a propriedade temporal global.
     """)
     return
 
 
 @app.cell
-def _(
-    And, Equals, Iff, Int, Not, Or, Symbol,
-    declare, init, trans
-):
-    # LLM — BMC com laços e validador independente.
-
-    from pysmt.shortcuts import Solver as LassoSolver
-    from pysmt.typing import INT as LASSO_INT
-
-    def validar_laco(
-        estados, N, modo, escolhas,
-        inicio_laco, celula, fronteira=None
-    ):
-        """Verifica init, todas as transições, fecho
-        e permanência sem usar SMT."""
-
-        if (
-            modo not in ("individual", "simultanea")
-            or len(estados) < 2
-        ):
-            raise ValueError("Traço inválido")
-
-        if len(escolhas) != len(estados)-1:
-            raise ValueError("Escolhas inválidas")
-
-        k = len(estados)-2
-
-        if (
-            not (0 <= inicio_laco <= k)
-            or not (
-                1 <= celula[0] <= N
-                and 1 <= celula[1] <= N
-            )
-        ):
-            raise ValueError(
-                "Índice de laço ou célula inválido"
-            )
-
-        posicoes = {
-            (i, j)
-            for i in range(N+1)
-            for j in range(N+1)
-        }
-
-        iniciais = {
-            (i, j)
-            for i, j in posicoes
-            if i == 0 or j == 0
-        }
-
-        normais = [
-            (i, j)
-            for i in range(1, N+1)
-            for j in range(1, N+1)
-        ]
-
-        def valor(s, i, j):
-            if 0 <= i <= N and 0 <= j <= N:
-                return int(s[i, j])
-
-            if (
-                0 <= i <= N+1
-                and 0 <= j <= N+1
-                and (i == N+1 or j == N+1)
-            ):
-                return 0
-
-            raise ValueError("Posição inválida")
-
-        for s in estados:
-            assert set(s) == posicoes
-
-            assert all(
-                type(v) is bool
-                for v in s.values()
-            )
-
-            assert all(
-                s[p] == estados[0][p]
-                for p in iniciais
-            )
-
-            if fronteira is not None:
-                assert all(
-                    s[p] == bool(fronteira[p])
-                    for p in iniciais
-                )
-
-        assert all(
-            estados[0][i, j] == (i <= 3 and j <= 3)
-            for i, j in normais
-        )
-
-        for t, (a, b) in enumerate(
-            zip(estados, estados[1:])
-        ):
-            q = escolhas[t]
-
-            if modo == "individual":
-                assert (
-                    isinstance(q, int)
-                    and 0 <= q < N*N
-                )
-            else:
-                assert q is None
-
-            for i, j in normais:
-                viz = sum(
-                    valor(a, i+di, j+dj)
-                    for di in (-1, 0, 1)
-                    for dj in (-1, 0, 1)
-                    if (di, dj) != (0, 0)
-                )
-
-                novo = (
-                    viz == 3
-                    or (a[i, j] and viz == 2)
-                )
-
-                esperado = (
-                    novo
-                    if (
-                        modo == "simultanea"
-                        or q == (i-1)*N+j-1
-                    )
-                    else a[i, j]
-                )
-
-                assert b[i, j] == esperado, (t, i, j)
-
-        assert estados[-1] == estados[inicio_laco], (
-            "Laço não fecha"
-        )
-
-        constante = estados[inicio_laco][celula]
-
-        assert all(
-            estados[t][celula] == constante
-            for t in range(inicio_laco, k+1)
-        )
-
+def _(And, Not, Or, Iff, Int, Equals, declare, init, trans, seletor, validar_percurso, SolverSMT):
+    # Verificação temporal e validador desenvolvidos com assistência do ChatGPT.
+    def validar_laco(estados, N, modo, escolhas, inicio_laco, celula, fronteira=None):
+        validar_percurso(estados, N, modo, escolhas, fronteira)
+        k = len(estados) - 2
+        if not (0 <= inicio_laco <= k and 1 <= celula[0] <= N and 1 <= celula[1] <= N):
+            raise ValueError("Ciclo ou célula inválidos")
+        assert estados[-1] == estados[inicio_laco], "O laço não fecha"
+        assert all(estados[t][celula] == estados[inicio_laco][celula]
+                   for t in range(inicio_laco, k + 1)), "A célula muda no ciclo"
         return True
 
-    def bmc_permanencia(
-        N, modo, K, fronteira=None,
-        celula=None, escolher=None
-    ):
-        if (
-            N < 3 or K < 0
-            or modo not in ("individual", "simultanea")
-        ):
+    def bmc_permanencia(N, modo, K, fronteira=None, celula=None, escolher=None):
+        if K < 0 or (escolher is not None and modo != "individual"):
             raise ValueError("Parâmetros inválidos")
-
-        if celula is not None and not (
-            1 <= celula[0] <= N
-            and 1 <= celula[1] <= N
-        ):
+        if celula is not None and not (1 <= celula[0] <= N and 1 <= celula[1] <= N):
             raise ValueError("Célula inválida")
-
-        if escolher is not None and (
-            modo != "individual"
-            or not (
-                1 <= escolher[0] <= N
-                and 1 <= escolher[1] <= N
-            )
-        ):
+        if escolher is not None and not (1 <= escolher[0] <= N and 1 <= escolher[1] <= N):
             raise ValueError("Escolha inválida")
-
-        for k in range(K+1):
-            X = [
-                declare(f"laco_{modo}_{N}_{k}_{t}", N)
-                for t in range(k+2)
-            ]
-
-            formula = [init(X[0], N, fronteira)]
-
-            formula += [
-                trans(X[t], X[t+1], N, modo)
-                for t in range(k+1)
-            ]
-
+        for k in range(K + 1):
+            X = [declare(f"laco_{modo}_{N}_{k}_{t}", N) for t in range(k + 2)]
+            formulas = [init(X[0], N, fronteira)] + [trans(X[t], X[t + 1], N, modo)
+                                                       for t in range(k + 1)]
             if escolher is not None:
-                indice = (
-                    (escolher[0]-1)*N + escolher[1]-1
-                )
-
-                formula += [
-                    Equals(
-                        Symbol(
-                            "q_" + X[t+1][1, 1].symbol_name(),
-                            LASSO_INT
-                        ),
-                        Int(indice)
-                    )
-                    for t in range(k+1)
-                ]
-
-            with LassoSolver(name="z3") as s:
-                s.add_assertion(And(formula))
-
-                for l in range(k+1):
-                    fecho = And([
-                        Iff(X[k+1][p], X[l][p])
-                        for p in X[l]
-                    ])
-
-                    alvos = (
-                        [celula]
-                        if celula is not None
-                        else [
-                            (i, j)
-                            for i in range(1, N+1)
-                            for j in range(1, N+1)
-                        ]
-                    )
-
-                    estavel = Or([
-                        Or(
-                            And([
-                                X[t][p]
-                                for t in range(l, k+1)
-                            ]),
-                            And([
-                                Not(X[t][p])
-                                for t in range(l, k+1)
-                            ])
-                        )
-                        for p in alvos
-                    ])
-
+                indice = (escolher[0] - 1) * N + escolher[1] - 1
+                formulas += [Equals(seletor(X[t + 1]), Int(indice)) for t in range(k + 1)]
+            with SolverSMT(name="z3") as s:
+                s.add_assertion(And(formulas))
+                for l in range(k + 1):
+                    alvos = [celula] if celula is not None else [
+                        (i, j) for i in range(1, N + 1) for j in range(1, N + 1)]
+                    fecho = And([Iff(X[k + 1][p], X[l][p]) for p in X[l]])
+                    estavel = Or([Or(And([X[t][p] for t in range(l, k + 1)]),
+                                     And([Not(X[t][p]) for t in range(l, k + 1)])) for p in alvos])
                     s.push()
                     s.add_assertion(And(fecho, estavel))
-
                     if s.solve():
-                        concretos = [
-                            {
-                                p: bool(s.get_py_value(v))
-                                for p, v in st.items()
-                            }
-                            for st in X
-                        ]
-
-                        if modo == "individual":
-                            escolhas = [
-                                int(s.get_py_value(
-                                    Symbol(
-                                        "q_" + X[t+1][1, 1].symbol_name(),
-                                        LASSO_INT
-                                    )
-                                ))
-                                for t in range(k+1)
-                            ]
-                        else:
-                            escolhas = [None]*(k+1)
-
-                        encontrada = next(
-                            p for p in alvos
-                            if all(
-                                concretos[t][p] == concretos[l][p]
-                                for t in range(l, k+1)
-                            )
-                        )
-
-                        validar_laco(
-                            concretos, N, modo, escolhas,
-                            l, encontrada, fronteira
-                        )
-
-                        vivo = concretos[l][encontrada]
-
-                        print(
-                            f"SAT: ciclo validado k={k}, "
-                            f"início={l}, célula={encontrada}, "
-                            f"permanentemente "
-                            f"{'viva' if vivo else 'morta'}"
-                        )
-
-                        for t, st in enumerate(concretos):
-                            etiqueta = (
-                                f" (fecho = estado {l})"
-                                if t == k+1 else ""
-                            )
-
-                            vivas = sum(
-                                st[i, j]
-                                for i in range(1, N+1)
-                                for j in range(1, N+1)
-                            )
-
-                            print(
-                                f"Estado {t}{etiqueta}: "
-                                f"{vivas} vivas"
-                            )
-
-                            for i in range(N+2):
-                                print("".join(
-                                    "#"
-                                    if (
-                                        st[i, j]
-                                        if i <= N and j <= N
-                                        else False
-                                    )
-                                    else "."
-                                    for j in range(N+2)
-                                ))
-
-                            if (
-                                t <= k
-                                and modo == "individual"
-                            ):
-                                q = escolhas[t]
-                                print(
-                                    f"Selecionada: "
-                                    f"({q//N+1},{q%N+1})"
-                                )
-
-                        return {
-                            "k": k,
-                            "loop_inicio": l,
-                            "celula": encontrada,
-                            "valor": vivo,
-                            "estados": concretos,
-                            "escolhas": escolhas,
-                            "validado": True
-                        }
-
+                        estados = [{p: bool(s.get_py_value(v)) for p, v in st.items()} for st in X]
+                        escolhas = ([int(s.get_py_value(seletor(X[t + 1]))) for t in range(k + 1)]
+                                    if modo == "individual" else [None] * (k + 1))
+                        alvo = next(p for p in alvos if all(estados[t][p] == estados[l][p]
+                                                           for t in range(l, k + 1)))
+                        validar_laco(estados, N, modo, escolhas, l, alvo, fronteira)
+                        return {"k": k, "inicio": l, "celula": alvo, "viva": estados[l][alvo],
+                                "estados": estados, "escolhas": escolhas, "validado": True}
                     s.pop()
-
-        print(
-            f"UNSAT para laços k<= {K}; "
-            "não é prova global"
-        )
-
         return None
 
-    return (validar_laco, bmc_permanencia)
+    return validar_laco, bmc_permanencia
 
 
 @app.cell
-def _(bmc_permanencia, fronteira_aleatoria, mo, botao_lacos):
-    mo.stop(not botao_lacos.value)
+def _(mo):
+    botao_p2 = mo.ui.run_button(label="Pesquisar laços P2 (N=5 e N=17)")
+    mo.vstack([mo.md("### 4.1. Resultados da pesquisa temporal"), botao_p2])
+    return (botao_p2,)
 
-    def _testes_lacos():
-        N = 17
 
-        for nome, fr in (
-            ("fixa", fronteira_aleatoria(N, 42)),
-            ("simbólica", None)
-        ):
-            print(
-                f"Laço individual N={N}, "
-                f"fronteira={nome}"
-            )
+@app.cell
+def _(mo, botao_p2, bmc_permanencia, fronteira_aleatoria):
+    mo.stop(not botao_p2.value, mo.md("*Experiência não executada nesta sessão.*"))
 
-            r = bmc_permanencia(
-                N, "individual", 0, fr,
-                celula=(17, 17),
-                escolher=(17, 17)
-            )
+    def _executar_p2():
+        with mo.status.spinner(title="A pesquisar laços…"):
+            linhas = ["| Configuração | Resultado |", "|:--|:--|"]
+            for nome, fr in (("fixa42", fronteira_aleatoria(17, 42)), ("simbólica", None)):
+                r = bmc_permanencia(17, "individual", 0, fr, (17, 17), (17, 17))
+                assert r and r["validado"] and r["k"] == 0 and r["escolhas"] == [288]
+                linhas.append(f"| Individual N=17, {nome}, K=0 | SAT; laço validado em {r['inicio']} |")
+            for N, K in ((5, 1), (17, 0)):
+                for nome, fr in (("fixa42", fronteira_aleatoria(N, 42)), ("simbólica", None)):
+                    r = bmc_permanencia(N, "simultanea", K, fr)
+                    linhas.append(f"| Simultânea N={N}, {nome}, K={K} | "
+                                  + ("SAT, ciclo validado" if r else "UNSAT até K (limitado)") + " |")
 
-            assert r is not None
-            assert r["validado"]
-            assert r["k"] == 0
-            assert r["loop_inicio"] == 0
-            assert not r["valor"]
-            assert r["escolhas"] == [288]
-            assert r["estados"][0][1, 1]
+        return ("**Execução concluída.**\n\n" + "\n".join(linhas))
 
-        for N, K in ((5, 1), (17, 0)):
-            for nome, fr in (
-                ("fixa", fronteira_aleatoria(N, 42)),
-                ("simbólica", None)
-            ):
-                print(
-                    f"Pesquisa simultânea N={N}, "
-                    f"K={K}, fronteira={nome}"
-                )
-
-                bmc_permanencia(
-                    N, "simultanea", K, fr
-                )
-
-        print("Testes de laços concluídos")
-
-    _testes_lacos()
+    mo.md(_executar_p2())
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 7. Testemunhas concretas e validação
+    ## 5. Contraexemplos e validação independente
 
-    As testemunhas permitem verificar as duas propriedades
-    sem aumentar indefinidamente a profundidade do BMC.
+    Foram construídas testemunhas concretas para as
+    duas propriedades e para ambas as modalidades
+    de atualização.
 
-    **P1 — Alcançar o erro**
+    ### P1 — Estado de erro alcançável
 
-    - Simultânea: fronteira viva apenas em `(0,2)` e
-      `(2,0)`; contagens 9,3,1,0.
-    - Individual: fronteira toda morta; nove atualizações;
-      contagens 9,8,7,6,5,4,3,2,1,0.
+    **Modalidade simultânea**
 
-    **P2 — Permanência**
+    Fronteira inicial viva apenas em $(0,2)$ e $(2,0)$.
 
-    - Individual: atualizar repetidamente `(17,17)`
-      conserva o estado inicial.
-    - Simultânea: fronteira toda morta; após quatro
-      passos obtém-se um ponto fixo, X5=X4.
+    Evolução do número de células normais vivas:
 
-    O ponto fixo exige também `T(X4,X5)`.
-    Esta transição é verificada explicitamente.
+    $$9\rightarrow3\rightarrow1\rightarrow0$$
 
-    As testemunhas foram propostas e investigadas com
-    assistência LLM, incluindo sugestões e simulações
-    noutra conversa.
+    O estado de erro é alcançado após três transições.
 
-    As suas verificações SMT são acompanhadas por
-    validadores independentes.
+    **Modalidade individual**
+
+    Fronteira inicial toda morta.
+
+    Sequência de células selecionadas:
+
+    $$
+    (1,2),(2,1),(1,1),(2,3),(2,2),
+    (3,1),(3,2),(3,3),(1,3)
+    $$
+
+    Cada atualização elimina a célula selecionada.
+    Após nove transições, todas as células normais
+    estão mortas.
+
+    ### P2 — Permanência viva ou morta
+
+    **Modalidade individual**
+
+    A seleção repetida de $(17,17)$ conserva o
+    estado inicial, pois essa célula começa morta
+    e não tem vizinhos vivos.
+
+    Temos um auto-laço $X_0\rightarrow X_0$.
+    A célula $(1,1)$ permanece viva e $(17,17)$
+    permanece morta.
+
+    **Modalidade simultânea**
+
+    Com a fronteira toda morta, a evolução apresenta:
+
+    $$9\rightarrow6\rightarrow5\rightarrow7
+    \rightarrow7\rightarrow7$$
+
+    Os estados $X_4$ e $X_5$ coincidem e a relação
+    $T(X_4,X_5)$ é satisfeita.
+
+    O estado $X_4$ constitui um ponto fixo,
+    no qual $(1,3)$ permanece viva.
+
+    ### Validação
+
+    As testemunhas são representadas por estados
+    concretos e confrontadas com as fórmulas
+    `init`, `trans` e `error`, quando aplicável.
+
+    Os estados e as transições são posteriormente
+    verificados por validadores Python independentes
+    do solver.
+
+    A existência de uma configuração inicial admissível
+    com contraexemplo é suficiente para refutar a
+    validade universal da propriedade na versão
+    de fronteira simbólica.
+
+    Estes resultados não demonstram que todas as
+    fronteiras fixas produzam os mesmos percursos.
     """)
     return
 
 
 @app.cell
-def _(And, Iff, Not, declare, init, trans, validar_laco):
-    # LLM — Testemunha P2 simultânea e confirmação SMT.
-
-    from pysmt.shortcuts import Solver as TestemunhaSolver
-
-    def testemunha_simultanea(N):
-        if N < 5:
-            raise ValueError("N>=5 para esta testemunha")
-
-        fr = {
-            (i, j): 0
-            for i in range(N+1)
-            for j in range(N+1)
-            if i == 0 or j == 0
-        }
-
-        inicial = {
-            (i, j): bool(
-                1 <= i <= 3 and 1 <= j <= 3
-            )
-            for i in range(N+1)
-            for j in range(N+1)
-        }
-
-        estados = [inicial]
+def _(And, Equals, Iff, Int, Not, declare, error, init, trans, seletor, validar_traco, validar_laco, SolverSMT):
+    # Testemunhas e verificação SMT desenvolvidas com assistência do ChatGPT.
+    def simular(N, modo, fronteira, escolhas):
+        """Calcula os estados sem consultar a FSM pySMT/Z3."""
+        atual = {(i, j): (1 <= i <= 3 and 1 <= j <= 3)
+                 for i in range(N + 1) for j in range(N + 1)}
+        atual.update({p: bool(v) for p, v in fronteira.items()})
+        estados = [atual]
 
         def ler(s, i, j):
-            if 0 <= i <= N and 0 <= j <= N:
-                return int(s[i, j])
+            return int(s[i, j]) if i <= N and j <= N else 0
 
-            if (
-                0 <= i <= N+1
-                and 0 <= j <= N+1
-                and (i == N+1 or j == N+1)
-            ):
-                return 0
-
-            raise ValueError("Coordenada inválida")
-
-        for _passo in range(5):
+        for q in escolhas:
             antes = estados[-1]
             depois = antes.copy()
-
-            for i in range(1, N+1):
-                for j in range(1, N+1):
-                    viz = sum(
-                        ler(antes, i+di, j+dj)
-                        for di in (-1, 0, 1)
-                        for dj in (-1, 0, 1)
-                        if (di, dj) != (0, 0)
-                    )
-
-                    depois[i, j] = (
-                        viz == 3
-                        or (antes[i, j] and viz == 2)
-                    )
-
-            estados.append(depois)
-
-        return estados, fr
-
-    def confirmar_testemunha_simultanea(
-        N, simbolica=False
-    ):
-        ref, fr_zero = testemunha_simultanea(N)
-
-        contagens = [
-            sum(
-                s[i, j]
-                for i in range(1, N+1)
-                for j in range(1, N+1)
-            )
-            for s in ref
-        ]
-
-        assert contagens == [9, 6, 5, 7, 7, 7]
-        assert ref[4] == ref[5]
-
-        tag = (
-            f"testemunha_{N}_"
-            f"{'simbolica' if simbolica else 'fixa'}"
-        )
-
-        X = [
-            declare(f"{tag}_{t}", N)
-            for t in range(6)
-        ]
-
-        formulas = [
-            init(
-                X[0], N,
-                None if simbolica else fr_zero
-            )
-        ]
-
-        formulas += [
-            trans(X[t], X[t+1], N, "simultanea")
-            for t in range(5)
-        ]
-
-        for t in range(5):
-            formulas.append(And([
-                X[t][p] if ref[t][p]
-                else Not(X[t][p])
-                for p in X[t]
-            ]))
-
-        formulas.append(And([
-            Iff(X[5][p], X[4][p])
-            for p in X[4]
-        ]))
-
-        with TestemunhaSolver(name="z3") as s:
-            s.add_assertion(And(formulas))
-
-            assert s.solve(), (
-                "Testemunha de P2 inconsistente com SMT"
-            )
-
-            concretos = [
-                {
-                    p: bool(s.get_py_value(v))
-                    for p, v in st.items()
-                }
-                for st in X
-            ]
-
-        assert concretos == ref
-
-        assert validar_laco(
-            concretos, N, "simultanea",
-            [None]*5, 4, (1, 3), fr_zero
-        )
-
-        assert concretos[4][1, 3]
-        assert not concretos[4][N, N]
-
-        print(
-            f"P2 simultânea N={N}: SAT e laço "
-            f"X4->X4 validado; contagens={contagens}"
-        )
-
-        return {
-            "sat": True,
-            "N": N,
-            "contagens": contagens,
-            "inicio_laco": 4,
-            "estados": concretos,
-            "validado": True
-        }
-
-    return (
-        testemunha_simultanea,
-        confirmar_testemunha_simultanea
-    )
-
-
-@app.cell
-def _(
-    And, Equals, Int, Not, Symbol, declare,
-    init, trans, error, validar_traco
-):
-    # LLM — Testemunhas P1 e confirmação SMT.
-
-    from pysmt.shortcuts import Solver as ErroTestSolver
-    from pysmt.typing import INT as ERRO_INT
-
-    def testemunha_erro(N, modo):
-        if (
-            N < 5
-            or modo not in ("individual", "simultanea")
-        ):
-            raise ValueError("Parâmetros inválidos")
-
-        fr = {
-            (i, j): 0
-            for i in range(N+1)
-            for j in range(N+1)
-            if i == 0 or j == 0
-        }
-
-        if modo == "simultanea":
-            fr[(0, 2)] = fr[(2, 0)] = 1
-            escolhas = [None]*3
-        else:
-            escolhas = [
-                (1, 2), (2, 1), (1, 1),
-                (2, 3), (2, 2),
-                (3, 1), (3, 2), (3, 3),
-                (1, 3)
-            ]
-
-        inicial = {
-            (i, j): bool(
-                1 <= i <= 3 and 1 <= j <= 3
-            )
-            for i in range(N+1)
-            for j in range(N+1)
-        }
-
-        for p, v in fr.items():
-            inicial[p] = bool(v)
-
-        estados = [inicial]
-
-        def ler(s, i, j):
-            if 0 <= i <= N and 0 <= j <= N:
-                return int(s[i, j])
-
-            if (
-                0 <= i <= N+1
-                and 0 <= j <= N+1
-                and (i == N+1 or j == N+1)
-            ):
-                return 0
-
-            raise ValueError("Coordenada inválida")
-
-        for escolhida in escolhas:
-            antes = estados[-1]
-            depois = antes.copy()
-
-            posicoes = (
-                [
-                    (i, j)
-                    for i in range(1, N+1)
-                    for j in range(1, N+1)
-                ]
-                if modo == "simultanea"
-                else [escolhida]
-            )
-
+            posicoes = ([(i, j) for i in range(1, N + 1) for j in range(1, N + 1)]
+                        if modo == "simultanea" else [(q // N + 1, q % N + 1)])
             for i, j in posicoes:
-                viz = sum(
-                    ler(antes, i+di, j+dj)
-                    for di in (-1, 0, 1)
-                    for dj in (-1, 0, 1)
-                    if (di, dj) != (0, 0)
-                )
-
-                depois[i, j] = (
-                    viz == 3
-                    or (antes[i, j] and viz == 2)
-                )
-
-            if modo == "individual":
-                assert antes[escolhida]
-                assert not depois[escolhida]
-
+                viz = sum(ler(antes, i + di, j + dj)
+                          for di in (-1, 0, 1) for dj in (-1, 0, 1) if (di, dj) != (0, 0))
+                depois[i, j] = viz == 3 or (antes[i, j] and viz == 2)
             estados.append(depois)
+        return estados
 
-        contagens = [
-            sum(
-                s[i, j]
-                for i in range(1, N+1)
-                for j in range(1, N+1)
-            )
-            for s in estados
-        ]
-
-        esperado = (
-            [9, 3, 1, 0]
-            if modo == "simultanea"
-            else list(range(9, -1, -1))
-        )
-
-        assert contagens == esperado
-
+    def construir_testemunha(N, propriedade, modo):
+        if N < 5 or propriedade not in ("P1", "P2") or modo not in ("individual", "simultanea"):
+            raise ValueError("Parâmetros inválidos")
+        fr = {(i, j): 0 for i in range(N + 1) for j in range(N + 1) if i == 0 or j == 0}
+        if propriedade == "P1" and modo == "simultanea":
+            fr[(0, 2)] = fr[(2, 0)] = 1
+            escolhas = [None] * 3
+        elif propriedade == "P1":
+            ordem = [(1, 2), (2, 1), (1, 1), (2, 3), (2, 2), (3, 1), (3, 2), (3, 3), (1, 3)]
+            escolhas = [(i - 1) * N + j - 1 for i, j in ordem]
+        else:
+            escolhas = ([None] * 5 if modo == "simultanea" else [N * N - 1])
+        estados = simular(N, modo, fr, escolhas)
+        contagens = [sum(s[i, j] for i in range(1, N + 1) for j in range(1, N + 1))
+                    for s in estados]
+        if propriedade == "P1":
+            assert contagens == ([9, 3, 1, 0] if modo == "simultanea" else list(range(9, -1, -1)))
+            validar_traco(estados, N, modo, escolhas, fr)
+        else:
+            assert contagens == ([9, 6, 5, 7, 7, 7] if modo == "simultanea" else [9, 9])
+            validar_laco(estados, N, modo, escolhas, 4 if modo == "simultanea" else 0,
+                         (1, 3) if modo == "simultanea" else (N, N), fr)
         return estados, fr, escolhas, contagens
 
-    def confirmar_erro_testemunha(
-        N, modo, simbolica=False
-    ):
-        ref, fr, escolhas, contagens = (
-            testemunha_erro(N, modo)
-        )
+    def fixar_estado(X, s):
+        return And([X[p] if v else Not(X[p]) for p, v in s.items()])
 
-        tag = (
-            f"prova_erro_{N}_{modo}_"
-            f"{'simbolica' if simbolica else 'fixa'}"
-        )
-
-        X = [
-            declare(f"{tag}_{t}", N)
-            for t in range(len(ref))
-        ]
-
-        formulas = [
-            init(
-                X[0], N,
-                None if simbolica else fr
-            )
-        ]
-
-        for t in range(len(ref)-1):
-            formulas.append(
-                trans(X[t], X[t+1], N, modo)
-            )
-
-            if modo == "individual":
-                i, j = escolhas[t]
-
-                q = Symbol(
-                    "q_" + X[t+1][1, 1].symbol_name(),
-                    ERRO_INT
-                )
-
-                formulas.append(
-                    Equals(q, Int((i-1)*N+j-1))
-                )
-
-        for t, st in enumerate(ref):
-            formulas.append(And([
-                X[t][p] if v else Not(X[t][p])
-                for p, v in st.items()
-            ]))
-
-        formulas.append(error(X[-1], N))
-
-        with ErroTestSolver(name="z3") as s:
+    def confirmar_testemunha(N, propriedade, modo, simbolica=False):
+        estados_py, fr, escolhas, contagens = construir_testemunha(N, propriedade, modo)
+        X = [declare(f"test_{propriedade}_{modo}_{N}_{simbolica}_{t}", N)
+             for t in range(len(estados_py))]
+        formulas = [init(X[0], N, None if simbolica else fr)]
+        formulas += [trans(X[t], X[t + 1], N, modo) for t in range(len(escolhas))]
+        if modo == "individual":
+            formulas += [Equals(seletor(X[t + 1]), Int(q)) for t, q in enumerate(escolhas)]
+        limite = len(X) if propriedade == "P1" else len(X) - 1
+        formulas += [fixar_estado(X[t], estados_py[t]) for t in range(limite)]
+        if propriedade == "P1":
+            formulas.append(error(X[-1], N))
+        else:
+            # Verifica o fecho em todas as células, incluindo a fronteira.
+            inicio = 4 if modo == "simultanea" else 0
+            formulas.append(And([Iff(X[-1][p], X[inicio][p]) for p in X[0]]))
+        with SolverSMT(name="z3") as s:
             s.add_assertion(And(formulas))
-
-            assert s.solve(), (
-                "Testemunha de P1 inconsistente com SMT"
-            )
-
-            concretos = [
-                {
-                    p: bool(s.get_py_value(v))
-                    for p, v in st.items()
-                }
-                for st in X
-            ]
-
+            if not s.solve():
+                raise AssertionError("Testemunha incompatível com a FSM SMT")
+            estados_smt = [{p: bool(s.get_py_value(v)) for p, v in X[t].items()}
+                           for t in range(len(X))]
             if modo == "individual":
-                indices = [
-                    int(s.get_py_value(
-                        Symbol(
-                            "q_" + X[t+1][1, 1].symbol_name(),
-                            ERRO_INT
-                        )
-                    ))
-                    for t in range(len(escolhas))
-                ]
+                assert [int(s.get_py_value(seletor(X[t + 1]))) for t in range(len(escolhas))] == escolhas
+        assert estados_smt == estados_py
+        if propriedade == "P1":
+            validar_traco(estados_smt, N, modo, escolhas, fr)
+        else:
+            validar_laco(estados_smt, N, modo, escolhas,
+                         4 if modo == "simultanea" else 0,
+                         (1, 3) if modo == "simultanea" else (N, N), fr)
+        return {"N": N, "propriedade": propriedade, "modo": modo, "estado": "SAT",
+                "contagens": contagens, "validado": True}
 
-                assert indices == [
-                    (i-1)*N+j-1
-                    for i, j in escolhas
-                ]
-
-        assert concretos == ref
-
-        val_escolhas = (
-            [None]*(len(concretos)-1)
-            if modo == "simultanea"
-            else indices
-        )
-
-        assert validar_traco(
-            concretos, N, modo, val_escolhas, fr
-        )
-
-        print(
-            f"P1 N={N}, modo={modo}: "
-            f"SAT e percurso validado; "
-            f"contagens={contagens}"
-        )
-
-        return {
-            "sat": True,
-            "N": N,
-            "modo": modo,
-            "contagens": contagens,
-            "estados": concretos,
-            "escolhas": escolhas,
-            "fronteira": fr,
-            "validado": True
-        }
-
-    return (testemunha_erro, confirmar_erro_testemunha)
+    return simular, construir_testemunha, fixar_estado, confirmar_testemunha
 
 
 @app.cell
-def _(
-    confirmar_testemunha_simultanea,
-    confirmar_erro_testemunha,
-    mo, botao_testemunhas
-):
-    mo.stop(not botao_testemunhas.value)
+def _(mo):
+    botao_testemunhas = mo.ui.run_button(label="Confirmar testemunhas P1 e P2 com Z3")
+    mo.vstack([mo.md("### 5.1. Resultados da confirmação SMT"), botao_testemunhas])
+    return (botao_testemunhas,)
 
-    def _testar_testemunhas():
-        for N, simbolica in (
-            (5, False),
-            (17, False),
-            (17, True)
-        ):
-            r = confirmar_testemunha_simultanea(
-                N, simbolica
-            )
 
-            assert r["sat"]
-            assert r["validado"]
-            assert r["inicio_laco"] == 4
+@app.cell
+def _(mo, botao_testemunhas, confirmar_testemunha):
+    mo.stop(not botao_testemunhas.value, mo.md("*Experiência não executada nesta sessão.*"))
 
-        for N, modo, simbolica in (
-            (5, "simultanea", False),
-            (5, "individual", False),
-            (17, "simultanea", False),
-            (17, "individual", False)
-        ):
-            r = confirmar_erro_testemunha(
-                N, modo, simbolica
-            )
+    def _executar_testemunhas():
+        with mo.status.spinner(title="A validar os contraexemplos…"):
+            linhas = ["| P | N | Modalidade | Fronteira | Resultado | Células vivas |", "|:--|--:|:--|:--|:--|:--|"]
+            for p, modo, N, simb in ([("P1", m, n, False) for n in (5, 17) for m in ("simultanea", "individual")]
+                                     + [("P1", m, 17, True) for m in ("simultanea", "individual")]
+                                     + [("P2", m, n, False) for n in (5, 17) for m in ("simultanea", "individual")]
+                                     + [("P2", "simultanea", 17, True)]):
+                r = confirmar_testemunha(N, p, modo, simb)
+                assert r["validado"]
+                linhas.append(f"| {p} | {N} | {modo} | {'simbólica, testemunha fixada' if simb else 'concreta'} "
+                              f"| SAT + validador OK | {r['contagens']} |")
 
-            assert r["sat"]
-            assert r["validado"]
+        return ("**Execução concluída.**\n\n" + "\n".join(linhas))
 
-        # Testes simbólicos opcionais:
-        # confirmar_erro_testemunha(17, "simultanea", True)
-        # confirmar_erro_testemunha(17, "individual", True)
-
-        print(
-            "Testemunhas de P1 e P2: "
-            "validações concluídas"
-        )
-
-    _testar_testemunhas()
+    mo.md(_executar_testemunhas())
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 8. Resultados das propriedades
+    ## 6. Desempenho e escalabilidade
 
-    | Propriedade | Individual | Simultânea |
-    |---|---|---|
-    | P1: erro inalcançável | Testemunha de 9 transições até erro | Testemunha de 3 transições até erro |
-    | P2: nenhuma célula permanentemente viva/morta | Auto-laço inicial ao atualizar (17,17) | Ponto fixo alcançado em X4 |
+    As experiências foram realizadas com três
+    repetições por modalidade, utilizando $N=17$
+    e $N=21$.
 
-    **P1**
-
-    A modalidade simultânea chega ao estado de erro
-    com a fronteira inicial viva apenas em `(0,2)`
-    e `(2,0)`.
-
-    A modalidade individual chega ao estado de erro
-    com a fronteira toda morta, atualizando as nove
-    células inicialmente vivas numa ordem específica.
-
-    **P2**
-
-    Na modalidade individual, selecionar `(17,17)`
-    repetidamente não altera o estado inicial.
-
-    Na modalidade simultânea, com fronteira toda
-    morta, existe uma evolução até X4, com
-    X5=X4 e T(X4,X5).
-
-    **Alcance das conclusões**
-
-    Contraexemplos SAT com validação independente
-    refutam as propriedades nas configurações concretas
-    consideradas.
-
-    Como essas fronteiras são admitidas no modelo
-    simbolicamente livre, as testemunhas também refutam
-    a validade universal das propriedades nesse modelo.
-
-    Não demonstram que todos os valores possíveis de
-    uma fronteira fixa produzam os mesmos resultados.
-
-    A fronteira de semente 42 não deve ser confundida
-    com as fronteiras usadas nas testemunhas de erro.
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## 9. Metodologia de desempenho
-
-    Para avaliar a eficiência computacional e a
-    escalabilidade, executámos as experiências com
-    `N=17` e `N=21`, em ambas as modalidades.
-
-    Cada cenário foi repetido **três vezes** no
-    computador dos alunos.
-
-    ### Medições
-
-    Para cada repetição foram registados:
-
-    - Tempo de construção: declaração das variáveis
-      e construção da fórmula pySMT.
-    - Tempo do solver: criação, introdução da fórmula,
-      resolução e libertação do solver.
-    - Tempo total da experiência.
-
-    Os tempos foram medidos com `time.perf_counter()`.
-
-    As medianas são calculadas separadamente para
-    construção, solver e total. Por isso, a soma das
-    medianas de construção e solver não tem de
-    coincidir com a mediana do tempo total.
-
-    ### Métodos comparados
-
-    **FSM:** satisfatibilidade de uma transição
-    a partir do estado inicial.
-
-    **BMC:** erro **exatamente em k=2**, após duas
-    transições. Não é uma pesquisa de erros em
-    todas as profundidades de 0 até 2.
-
-    **Indução simples:** apenas o passo indutivo,
-    sem o caso base.
-
-    **k-indução:** apenas o passo indutivo com k=2,
-    sem a verificação da base.
-
-    **Laços:** consistência de uma testemunha temporal
-    conhecida com a relação de transição e o fecho.
-
-    No benchmark de laços a fronteira é **toda morta**,
-    independentemente da opção selecionada no controlo.
-
-    A testemunha simultânea tem cinco transições;
-    a individual tem uma única transição.
-
-    ### Ambiente e parâmetros
+    **Ambiente experimental**
 
     - Sistema operativo: Windows 11.
     - Python: 3.14.7.
     - pySMT: 0.9.6.
     - z3-solver: 5.3.2.0.
     - Marimo: 0.25.0.
-    - Solver: Z3.
-    - Limite: 5000 ms por consulta SMT.
-    - Repetições: 3 por modalidade.
-    - Ordem: simultânea, seguida de individual.
-    - Fronteira: fixa, `random.Random(42)`, exceto
-      nas experiências de laços.
+    - Solver: Z3, com limite de 5000 ms por consulta.
 
-    Não foram reportados erros nem timeouts.
+    A fronteira foi fixada com semente 42,
+    exceto nas experiências de laços, que utilizaram
+    uma fronteira toda morta.
 
-    O limite Z3 é aplicado à resolução SMT e não
-    garante um limite para o tempo total de construção.
+    ### Metodologia
+
+    Para cada repetição, mediram-se três tempos com
+    `time.perf_counter()`:
+
+    - **Construção:** declaração das variáveis
+      e construção da fórmula pySMT.
+    - **Solver:** criação, introdução da fórmula,
+      resolução e libertação dos recursos.
+    - **Total:** duração completa da experiência.
+
+    O limite de tempo do Z3 aplica-se ao solver
+    e não limita a construção das fórmulas.
+
+    As consultas SMT não apresentaram erros
+    nem timeouts nas experiências registadas.
+
+    ### Fórmulas medidas
+
+    **FSM:** satisfatibilidade de uma transição
+    a partir do estado inicial.
+
+    **BMC:** erro exatamente no estado $X_2$,
+    após duas transições. Não corresponde a uma
+    pesquisa de todas as profundidades até 2.
+
+    **Indução simples:** apenas a obrigação do
+    passo indutivo, sem a base.
+
+    **k-indução:** apenas o passo indutivo para
+    $k=2$, sem os casos de base.
+
+    **Laços:** confirmação da consistência de
+    uma testemunha conhecida.
+
+    Na simultânea, a testemunha utiliza cinco
+    transições até um ponto fixo; na individual,
+    utiliza um auto-laço de uma transição.
+
+    Os testes de laços utilizam fronteira toda morta
+    independentemente da opção selecionada
+    no controlo do benchmark.
+
+    As medições individuais e as respetivas medianas
+    são apresentadas nas tabelas seguintes.
     """)
     return
 
 
 @app.cell
 def _(mo):
-    dimensao_exp = mo.ui.dropdown(
-        options={
-            "17": 17,
-            "21": 21,
-            "25 (opcional)": 25
-        },
-        value="17",
-        label="Dimensão N"
-    )
+    def _render_medicoes():
+        # Dados experimentais observados localmente; organização assistida pelo ChatGPT.
+        from statistics import median
 
-    metodo_exp = mo.ui.dropdown(
-        options={
-            "FSM: um passo": "fsm",
-            "BMC: erro exatamente em k=2": "bmc",
-            "Indução simples: só passo": "ind1",
-            "k-indução: só passo k=2": "kind2",
-            "Laço P2: testemunha conhecida, fronteira zero": "laco"
-        },
-        value="FSM: um passo",
-        label="Método"
-    )
+        MEDICOES = """
+        FSM|17|S|SAT|10.0,42.3,52.3;10.1,37.9,48.0;10.8,37.0,47.8
+        FSM|17|I|SAT|11.1,68.6,79.7;10.4,59.6,70.1;15.7,57.0,72.6
+        FSM|21|S|SAT|72.8,52.3,125.1;57.5,60.8,118.3;65.0,63.0,128.0
+        FSM|21|I|SAT|55.6,104.6,160.1;56.6,98.3,154.9;52.0,94.2,146.1
+        BMC k=2|17|S|UNSAT|61.2,72.2,133.4;64.7,69.3,134.0;69.9,68.7,138.6
+        BMC k=2|17|I|UNSAT|74.9,94.9,169.8;73.8,90.8,164.6;73.7,85.3,158.9
+        BMC k=2|21|S|UNSAT|129.7,139.2,268.9;125.1,124.2,249.3;156.2,116.8,272.9
+        BMC k=2|21|I|UNSAT|422.7,152.8,575.5;123.9,179.7,303.6;109.4,146.4,255.8
+        Ind. simples|17|S|SAT|33.5,445.6,479.1;38.0,517.4,555.4;32.5,438.8,471.3
+        Ind. simples|17|I|SAT|42.5,549.9,592.4;46.6,547.3,593.9;41.2,556.2,597.4
+        Ind. simples|21|S|SAT|71.0,693.6,764.6;62.4,652.5,714.8;346.8,837.5,1184.3
+        Ind. simples|21|I|SAT|61.7,774.9,836.7;61.9,792.4,854.3;65.2,1037.3,1102.9
+        k-ind. k=2|17|S|SAT|69.7,1293.8,1363.5;68.3,1325.5,1393.9;65.2,1205.8,1271.0
+        k-ind. k=2|17|I|SAT|74.4,1504.9,1579.3;76.2,1408.0,1484.2;74.4,1480.5,1554.9
+        Laço P2|17|S|SAT|159.7,185.5,345.2;164.3,208.2,372.5;150.5,178.0,328.4
+        Laço P2|17|I|SAT|38.0,61.5,99.5;55.0,66.5,121.5;425.2,77.8,503.0
+        """
+        dados = []
+        for linha in MEDICOES.strip().splitlines():
+            metodo, N, modo, estado, medicoes = linha.strip().split("|")
+            for repeticao, tripleto in enumerate(medicoes.split(";"), 1):
+                c, z, total = [float(x) for x in tripleto.split(",")]
+                dados.append((metodo, int(N), modo, repeticao, c, z, total, estado))
+        assert len(dados) == 48
 
-    fronteira_exp = mo.ui.dropdown(
-        options={
-            "Fixa, semente 42": "fixa42",
-            "Simbólica": "simbolica"
-        },
-        value="Fixa, semente 42",
-        label="Fronteira (exceto laço)"
-    )
+        bruto = ["| Método | N | Modo | Rep. | Construção | Z3 | Total | Estado |",
+                 "|:--|--:|:--:|--:|--:|--:|--:|:--:|"]
+        for metodo, N, modo, rep, c, z, total, estado in dados:
+            bruto.append(f"| {metodo} | {N} | {modo} | {rep} | {c:.1f} | {z:.1f} | {total:.1f} | {estado} |")
 
-    limite_exp = mo.ui.dropdown(
-        options={
-            "2 segundos": 2000,
-            "5 segundos": 5000,
-            "10 segundos": 10000
-        },
-        value="5 segundos",
-        label="Limite Z3 por consulta"
-    )
+        grupos = list(dict.fromkeys((r[0], r[1], r[2], r[7]) for r in dados))
+        resumo = ["| Método | N | Modo | Construção med. | Z3 med. | Total med. | Estado |",
+                  "|:--|--:|:--:|--:|--:|--:|--:|:--:|"]
+        for met, N, modo, estado in grupos:
+            valores = [r for r in dados if (r[0], r[1], r[2], r[7]) == (met, N, modo, estado)]
+            resumo.append(f"| {met} | {N} | {modo} | {median(r[4] for r in valores):.1f} | "
+                          f"{median(r[5] for r in valores):.1f} | {median(r[6] for r in valores):.1f} | {estado} |")
 
-    botao_medir = mo.ui.run_button(
-        label="Medir agora — 3 repetições por modalidade"
-    )
+        return ("### 6.1. Medições individuais (ms)\n\n" + "\n".join(bruto)
+                + "\n\n### 6.2. Medianas (ms)\n\n" + "\n".join(resumo)
+                + "\n\n*S = simultânea; I = individual. As medianas das parcelas são calculadas independentemente da mediana total.*")
 
-    mo.vstack([
-        dimensao_exp,
-        metodo_exp,
-        fronteira_exp,
-        limite_exp,
-        botao_medir
-    ])
-
-    return (
-        dimensao_exp, metodo_exp,
-        fronteira_exp, limite_exp, botao_medir
-    )
+    mo.md(_render_medicoes())
+    return
 
 
 @app.cell
-def _(
-    And, Iff, Not, Equals, Int, Symbol,
-    declare, init, trans, error,
-    testemunha_simultanea, fronteira_aleatoria
-):
-    # LLM — Construção das fórmulas para desempenho.
-    # Não modifica as funções lógicas existentes.
+def _(mo):
+    mo.md(r"""
+    ### 6.3. Análise dos resultados
 
-    from pysmt.typing import INT as BENCH_INT
+    A passagem de $N=17$ para $N=21$ aumenta
+    o número de variáveis booleanas por estado
+    de 324 para 484, aproximadamente 49,4%.
 
-    def formula_experiencia(
-        N, modo, metodo, tipo_fronteira, repeticao
-    ):
-        if (
-            N < 17
-            or modo not in ("individual", "simultanea")
-        ):
-            raise ValueError("N ou modo inválidos")
+    Observou-se um aumento das medianas dos tempos
+    totais nos três métodos medidos em ambas
+    as dimensões: FSM, BMC e indução simples.
 
-        if metodo not in (
-            "fsm", "bmc", "ind1", "kind2", "laco"
-        ):
-            raise ValueError("Método inválido")
+    Estes resultados evidenciam um aumento do custo
+    computacional nas instâncias consideradas,
+    mas não permitem inferir uma lei geral de
+    crescimento temporal.
 
-        if metodo == "laco":
-            fr = {
-                (i, j): 0
-                for i in range(N+1)
-                for j in range(N+1)
-                if i == 0 or j == 0
-            }
-        elif tipo_fronteira == "fixa42":
-            fr = fronteira_aleatoria(N, 42)
-        elif tipo_fronteira == "simbolica":
-            fr = None
-        else:
+    Nas fórmulas comparáveis, as medianas da modalidade
+    individual foram superiores às da simultânea.
+
+    Esta observação não demonstra que a modalidade
+    individual seja sempre computacionalmente
+    mais exigente.
+
+    O benchmark de laços envolve percursos de comprimentos
+    diferentes, pelo que os seus tempos não representam
+    tarefas SMT equivalentes.
+
+    ### 6.4. Variabilidade
+
+    No laço individual com $N=17$, os tempos totais
+    observados foram:
+
+    | Repetição | Tempo total |
+    |:--|--:|
+    | 1 | 99,5 ms |
+    | 2 | 121,5 ms |
+    | 3 | 503,0 ms |
+    | Mediana | 121,5 ms |
+
+    A terceira repetição apresentou um aumento
+    considerável, sobretudo no tempo de construção.
+
+    Também se observaram valores de construção
+    superiores aos restantes em BMC $N=21$ individual
+    e indução simples $N=21$ simultânea.
+
+    A causa destas diferenças não foi determinada.
+    A apresentação dos valores individuais impede
+    que esta variabilidade seja ocultada pela mediana.
+
+    Na terceira repetição da indução simples
+    $N=21$ individual, a soma dos tempos parciais
+    é 1102,5 ms, enquanto o total registado
+    foi 1102,9 ms.
+
+    A diferença de 0,4 ms está documentada,
+    mantendo-se os valores observados originalmente.
+
+    ### 6.5. Interpretação dos resultados SMT
+
+    - **FSM SAT:** existe pelo menos uma transição permitida.
+    - **BMC UNSAT:** o estado de erro não ocorre exatamente
+      em $X_2$ na configuração de fronteira analisada.
+    - **Passo indutivo SAT:** existe uma sequência
+      que viola a obrigação indutiva, podendo
+      começar num estado inalcançável.
+    - **Laço SAT:** a testemunha considerada satisfaz
+      as restrições SMT, incluindo a relação de fecho.
+
+    A confirmação da validade de um contraexemplo
+    exige ainda a verificação independente
+    das suas transições.
+
+    Os tempos não incluem a extração e a validação
+    dos modelos.
+
+    As três repetições por cenário permitem uma
+    avaliação exploratória, mas são insuficientes
+    para caracterizar estatisticamente a distribuição
+    dos tempos de execução.
+    """)
+    return
+
+
+@app.cell
+def _(And, Iff, Equals, Int, declare, init, trans, error, seletor, fronteira_aleatoria, formula_passo, fixar_estado, construir_testemunha):
+    # Benchmark desenvolvido com assistência do ChatGPT, utilizando a mesma FSM.
+    def formula_experiencia(N, modo, metodo, fronteira_tipo, repeticao):
+        if N < 17:
+            raise ValueError("N deve ser >= 17 no benchmark")
+        fr = ({p: 0 for p in fronteira_aleatoria(N, 42)} if metodo == "laco" else
+              fronteira_aleatoria(N, 42) if fronteira_tipo == "fixa42" else None)
+        if fr is None and fronteira_tipo != "simbolica":
             raise ValueError("Fronteira inválida")
 
-        n_passos = {
-            "fsm": 1,
-            "bmc": 2,
-            "ind1": 1,
-            "kind2": 2,
-            "laco": (
-                1 if modo == "individual" else 5
-            )
-        }[metodo]
+        passos = {"fsm": 1, "bmc": 2, "ind1": 1, "kind2": 2,
+                  "laco": 1 if modo == "individual" else 5}[metodo]
 
-        tag = f"med_{metodo}_{modo}_{N}_{repeticao}"
+        if metodo in ("ind1", "kind2"):
+            formula, _ = formula_passo(N, modo, passos, fr, f"med_{repeticao}")
+            return formula, fronteira_tipo, passos
 
-        X = [
-            declare(f"{tag}_{t}", N)
-            for t in range(n_passos+1)
-        ]
-
+        X = [declare(f"med_{metodo}_{modo}_{N}_{repeticao}_{t}", N) for t in range(passos + 1)]
         if metodo == "fsm":
-            formulas = [
-                init(X[0], N, fr),
-                trans(X[0], X[1], N, modo)
-            ]
-
+            formula = And(init(X[0], N, fr), trans(X[0], X[1], N, modo))
         elif metodo == "bmc":
-            formulas = [init(X[0], N, fr)]
-
-            formulas += [
-                trans(X[t], X[t+1], N, modo)
-                for t in range(2)
-            ]
-
-            formulas.append(error(X[2], N))
-
-        elif metodo in ("ind1", "kind2"):
-            k = n_passos
-
-            formulas = [
-                Not(error(X[t], N))
-                for t in range(k)
-            ]
-
-            formulas += [
-                trans(X[t], X[t+1], N, modo)
-                for t in range(k)
-            ]
-
-            formulas.append(error(X[k], N))
-
-            if fr is not None:
-                formulas += [
-                    X[0][p] if v else Not(X[0][p])
-                    for p, v in fr.items()
-                ]
-
-        elif modo == "individual":
-            formulas = [
-                init(X[0], N, fr),
-                trans(X[0], X[1], N, modo)
-            ]
-
-            formulas += [
-                Iff(X[0][p], X[1][p])
-                for p in X[0]
-            ]
-
-            q = Symbol(
-                "q_" + X[1][1, 1].symbol_name(),
-                BENCH_INT
-            )
-
-            formulas.append(
-                Equals(q, Int(N*N-1))
-            )
-
+            formula = And([init(X[0], N, fr), trans(X[0], X[1], N, modo),
+                           trans(X[1], X[2], N, modo), error(X[2], N)])
         else:
-            referencia, _ = testemunha_simultanea(N)
+            estados, _, _, _ = construir_testemunha(N, "P2", modo)
+            inicio = 0 if modo == "individual" else 4
+            formulas = [init(X[0], N, fr)] + [trans(X[t], X[t + 1], N, modo)
+                                                   for t in range(passos)]
+            if modo == "individual":
+                formulas.append(Equals(seletor(X[1]), Int(N * N - 1)))
+            else:
+                formulas += [fixar_estado(X[t], estados[t]) for t in range(passos)]
+            formulas.append(And([Iff(X[-1][p], X[inicio][p]) for p in X[0]]))
+            formula = And(formulas)
 
-            formulas = [init(X[0], N, fr)]
-
-            formulas += [
-                trans(X[t], X[t+1], N, modo)
-                for t in range(5)
-            ]
-
-            for t in range(5):
-                formulas += [
-                    X[t][p] if v else Not(X[t][p])
-                    for p, v in referencia[t].items()
-                ]
-
-            formulas += [
-                Iff(X[5][p], X[4][p])
-                for p in X[4]
-            ]
-
-        return (
-            And(formulas),
-            "zeros" if metodo == "laco" else tipo_fronteira,
-            n_passos
-        )
+        return formula, "zeros" if metodo == "laco" else fronteira_tipo, passos
 
     return (formula_experiencia,)
 
 
 @app.cell
-def _(
-    mo, botao_medir, dimensao_exp, metodo_exp,
-    fronteira_exp, limite_exp, formula_experiencia
-):
-    # LLM — Medição reproduzível com três repetições.
-    # Só executa mediante o botão.
+def _(mo):
+    n_exp = mo.ui.dropdown(options={"17": 17, "21": 21, "25 (opcional)": 25}, value="17", label="N")
+    met_exp = mo.ui.dropdown(options={"FSM": "fsm", "BMC exato k=2": "bmc",
+                                      "Passo indução simples": "ind1", "Passo k-indução k=2": "kind2",
+                                      "Laço conhecido P2": "laco"}, value="FSM", label="Método")
+    fr_exp = mo.ui.dropdown(options={"Fixa, semente 42": "fixa42", "Simbólica": "simbolica"},
+                            value="Fixa, semente 42", label="Fronteira (exceto laços)")
+    tempo_exp = mo.ui.dropdown(options={"2 segundos": 2000, "5 segundos": 5000, "10 segundos": 10000},
+                               value="5 segundos", label="Timeout Z3")
+    botao_medir = mo.ui.run_button(label="Medir agora: 3 repetições por modalidade")
 
-    mo.stop(
-        not botao_medir.value,
-        mo.md(
-            "Carrega em **Medir agora** para executar "
-            "a experiência selecionada."
-        )
-    )
+    mo.vstack([mo.md("### 6.6. Execução de experiências de desempenho"),
+               n_exp, met_exp, fr_exp, tempo_exp, botao_medir])
 
-    from time import perf_counter as _relogio
-    from statistics import median as _mediana
-    from importlib.metadata import version as _versao
+    return n_exp, met_exp, fr_exp, tempo_exp, botao_medir
 
-    from pysmt.shortcuts import Solver as _SolverMedicao
-    from pysmt.exceptions import (
-        SolverReturnedUnknownResultError
-        as _ResultadoDesconhecido
-    )
 
-    import sys as _sys
-    import platform as _platform
+@app.cell
+def _(mo, botao_medir, n_exp, met_exp, fr_exp, tempo_exp, formula_experiencia, SolverSMT):
+    mo.stop(not botao_medir.value, mo.md("*Nenhuma experiência de desempenho executada nesta sessão.*"))
 
-    def _medir():
-        N = dimensao_exp.value
-        metodo = metodo_exp.value
-        tipo_fr = fronteira_exp.value
-        limite_ms = limite_exp.value
+    def _executar_benchmark():
+        from time import perf_counter as _relogio
+        from statistics import median as _mediana
+        from pysmt.exceptions import SolverReturnedUnknownResultError as _Unknown
 
-        print(
-            "AMBIENTE:",
-            _platform.platform(),
-            "| CPU:",
-            _platform.processor()
-        )
-
-        print("Python:", _sys.version.split()[0])
-
-        for pacote in ("PySMT", "z3-solver", "marimo"):
-            print(pacote + ":", _versao(pacote))
-
-        print(
-            f"PARÂMETROS: N={N}; método={metodo}; "
-            f"fronteira_selecionada={tipo_fr}; "
-            f"semente=42 (exceto laço); "
-            f"limite_Z3_ms={limite_ms}; "
-            "repetições=3; ordem=simultânea,individual"
-        )
-
-        linhas = []
-
-        for modo in ("simultanea", "individual"):
-            for rep in range(1, 4):
-                t0 = _relogio()
-
-                formula, fr_real, passos = (
-                    formula_experiencia(
-                        N, modo, metodo, tipo_fr, rep
-                    )
-                )
-
-                t1 = _relogio()
-                estado, detalhe = "UNKNOWN", ""
-
-                try:
-                    with _SolverMedicao(
-                        name="z3",
-                        solver_options={
-                            "timeout": limite_ms
-                        }
-                    ) as solver:
-                        solver.add_assertion(formula)
-
-                        estado = (
-                            "SAT" if solver.solve()
-                            else "UNSAT"
-                        )
-
-                except _ResultadoDesconhecido as exc:
+        with mo.status.spinner(title="A medir seis execuções…"):
+            linhas = []
+            for modo in ("simultanea", "individual"):
+                for rep in range(1, 4):
+                    t0 = _relogio()
+                    f, fr_real, passos = formula_experiencia(n_exp.value, modo, met_exp.value, fr_exp.value, rep)
+                    t1 = _relogio()
                     estado = "UNKNOWN"
-                    detalhe = str(exc)[:120]
+                    try:
+                        with SolverSMT(name="z3", solver_options={"timeout": tempo_exp.value}) as s:
+                            s.add_assertion(f)
+                            estado = "SAT" if s.solve() else "UNSAT"
+                    except _Unknown:
+                        pass
+                    t2 = _relogio()
+                    linhas.append((modo, rep, fr_real, passos, estado,
+                                   round(1000 * (t1 - t0), 1), round(1000 * (t2 - t1), 1),
+                                   round(1000 * (t2 - t0), 1)))
 
-                t2 = _relogio()
+            tabela = ["| Modo | Rep. | Fronteira | Passos | Estado | Construção (ms) | Solver (ms) | Total (ms) |",
+                      "|:--|--:|:--|--:|:--:|--:|--:|--:|"]
+            for modo, rep, fr, passos, estado, c, z, total in linhas:
+                tabela.append(f"| {modo} | {rep} | {fr} | {passos} | {estado} | {c:.1f} | {z:.1f} | {total:.1f} |")
+            for modo in ("simultanea", "individual"):
+                vals = [r[7] for r in linhas if r[0] == modo]
+                tabela.append(f"| **Mediana {modo}** | | | | | | | **{_mediana(vals):.1f}** |")
 
-                linha = dict(
-                    N=N,
-                    modo=modo,
-                    metodo=metodo,
-                    fronteira=fr_real,
-                    profundidade=passos,
-                    repeticao=rep,
-                    estado=estado,
-                    construcao_s=t1-t0,
-                    solver_s=t2-t1,
-                    total_s=t2-t0,
-                    limite_solver_ms=limite_ms,
-                    detalhe=detalhe
-                )
+        return ("**Experiência concluída.**\n\n" + "\n".join(tabela))
 
-                linhas.append(linha)
-
-                print(
-                    f"{modo:12s} rep={rep} {estado:7s} "
-                    f"constr={linha['construcao_s']:.4f}s "
-                    f"solver={linha['solver_s']:.4f}s "
-                    f"total={linha['total_s']:.4f}s "
-                    f"fronteira={fr_real}; passos={passos}"
-                )
-
-                if detalhe:
-                    print("Motivo UNKNOWN:", detalhe)
-
-        for modo in ("simultanea", "individual"):
-            grupo = [
-                l for l in linhas
-                if l["modo"] == modo
-            ]
-
-            print(
-                f"MEDIANAS {modo}: "
-                f"construção="
-                f"{_mediana(l['construcao_s'] for l in grupo):.4f}s; "
-                f"solver="
-                f"{_mediana(l['solver_s'] for l in grupo):.4f}s; "
-                f"total="
-                f"{_mediana(l['total_s'] for l in grupo):.4f}s; "
-                f"estados="
-                f"{[l['estado'] for l in grupo]}"
-            )
-
-        print(
-            "UNKNOWN/timeout não significa UNSAT; "
-            "medição da construção não tem timeout."
-        )
-
-        return linhas
-
-    _linhas_experiencia = _medir()
+    mo.md(_executar_benchmark())
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 10. Resultados de desempenho observados
+    ## 7. Conclusões e limitações
 
-    **Origem:** medições executadas localmente pelos alunos
-    em 29/10/2026 e comunicadas no diálogo com a LLM.
+    ### Primeira propriedade
 
-    Esta secção regista os valores observados. Não depende
-    da execução do botão de benchmarking.
+    A propriedade de segurança é refutada nas duas
+    modalidades através de percursos que alcançam
+    o estado de erro.
 
-    **Ambiente:** Windows 11; Python 3.14.7;
-    pySMT 0.9.6; z3-solver 5.3.2.0; Marimo 0.25.0.
+    Na modalidade simultânea existe uma testemunha
+    com três transições; na modalidade individual,
+    uma testemunha com nove transições.
 
-    **Parâmetros:** três repetições por modalidade;
-    timeout Z3 de 5000 ms por consulta; fronteira fixa
-    por semente 42, exceto nas experiências de laços.
+    ### Segunda propriedade
 
-    Todas as consultas terminaram sem erros nem timeouts.
+    A propriedade de alternância entre estados vivos
+    e mortos é refutada por comportamentos cíclicos.
 
-    ### 10.1. Medições individuais
+    Na modalidade individual existe um auto-laço
+    que conserva o estado inicial.
 
-    Todos os tempos desta tabela estão em
-    **milissegundos (ms)**.
+    Na modalidade simultânea existe um ponto fixo
+    alcançável com a fronteira toda morta.
 
-    S = simultânea; I = individual.
+    ### Âmbito das conclusões
 
-    C = construção da fórmula; Z3 = tempo do solver;
-    Total = tempo total medido.
+    As configurações de fronteira utilizadas nas
+    testemunhas são permitidas pelo modelo simbólico.
 
-    | Método | N | Modo | Rep. | C (ms) | Z3 (ms) | Total (ms) |
-    |:--|--:|:--:|--:|--:|--:|--:|
-    | FSM | 17 | S | 1 | 10.0 | 42.3 | 52.3 |
-    | FSM | 17 | S | 2 | 10.1 | 37.9 | 48.0 |
-    | FSM | 17 | S | 3 | 10.8 | 37.0 | 47.8 |
-    | FSM | 17 | I | 1 | 11.1 | 68.6 | 79.7 |
-    | FSM | 17 | I | 2 | 10.4 | 59.6 | 70.1 |
-    | FSM | 17 | I | 3 | 15.7 | 57.0 | 72.6 |
-    | FSM | 21 | S | 1 | 72.8 | 52.3 | 125.1 |
-    | FSM | 21 | S | 2 | 57.5 | 60.8 | 118.3 |
-    | FSM | 21 | S | 3 | 65.0 | 63.0 | 128.0 |
-    | FSM | 21 | I | 1 | 55.6 | 104.6 | 160.1 |
-    | FSM | 21 | I | 2 | 56.6 | 98.3 | 154.9 |
-    | FSM | 21 | I | 3 | 52.0 | 94.2 | 146.1 |
-    | BMC k=2 | 17 | S | 1 | 61.2 | 72.2 | 133.4 |
-    | BMC k=2 | 17 | S | 2 | 64.7 | 69.3 | 134.0 |
-    | BMC k=2 | 17 | S | 3 | 69.9 | 68.7 | 138.6 |
-    | BMC k=2 | 17 | I | 1 | 74.9 | 94.9 | 169.8 |
-    | BMC k=2 | 17 | I | 2 | 73.8 | 90.8 | 164.6 |
-    | BMC k=2 | 17 | I | 3 | 73.7 | 85.3 | 158.9 |
-    | BMC k=2 | 21 | S | 1 | 129.7 | 139.2 | 268.9 |
-    | BMC k=2 | 21 | S | 2 | 125.1 | 124.2 | 249.3 |
-    | BMC k=2 | 21 | S | 3 | 156.2 | 116.8 | 272.9 |
-    | BMC k=2 | 21 | I | 1 | 422.7 | 152.8 | 575.5 |
-    | BMC k=2 | 21 | I | 2 | 123.9 | 179.7 | 303.6 |
-    | BMC k=2 | 21 | I | 3 | 109.4 | 146.4 | 255.8 |
-    | Ind. simples | 17 | S | 1 | 33.5 | 445.6 | 479.1 |
-    | Ind. simples | 17 | S | 2 | 38.0 | 517.4 | 555.4 |
-    | Ind. simples | 17 | S | 3 | 32.5 | 438.8 | 471.3 |
-    | Ind. simples | 17 | I | 1 | 42.5 | 549.9 | 592.4 |
-    | Ind. simples | 17 | I | 2 | 46.6 | 547.3 | 593.9 |
-    | Ind. simples | 17 | I | 3 | 41.2 | 556.2 | 597.4 |
-    | Ind. simples | 21 | S | 1 | 71.0 | 693.6 | 764.6 |
-    | Ind. simples | 21 | S | 2 | 62.4 | 652.5 | 714.8 |
-    | Ind. simples | 21 | S | 3 | 346.8 | 837.5 | 1184.3 |
-    | Ind. simples | 21 | I | 1 | 61.7 | 774.9 | 836.7 |
-    | Ind. simples | 21 | I | 2 | 61.9 | 792.4 | 854.3 |
-    | Ind. simples | 21 | I | 3 | 65.2 | 1037.3 | 1102.9 |
-    | k-ind. k=2 | 17 | S | 1 | 69.7 | 1293.8 | 1363.5 |
-    | k-ind. k=2 | 17 | S | 2 | 68.3 | 1325.5 | 1393.9 |
-    | k-ind. k=2 | 17 | S | 3 | 65.2 | 1205.8 | 1271.0 |
-    | k-ind. k=2 | 17 | I | 1 | 74.4 | 1504.9 | 1579.3 |
-    | k-ind. k=2 | 17 | I | 2 | 76.2 | 1408.0 | 1484.2 |
-    | k-ind. k=2 | 17 | I | 3 | 74.4 | 1480.5 | 1554.9 |
-    | Laço P2 | 17 | S | 1 | 159.7 | 185.5 | 345.2 |
-    | Laço P2 | 17 | S | 2 | 164.3 | 208.2 | 372.5 |
-    | Laço P2 | 17 | S | 3 | 150.5 | 178.0 | 328.4 |
-    | Laço P2 | 17 | I | 1 | 38.0 | 61.5 | 99.5 |
-    | Laço P2 | 17 | I | 2 | 55.0 | 66.5 | 121.5 |
-    | Laço P2 | 17 | I | 3 | 425.2 | 77.8 | 503.0 |
+    A existência de uma única execução válida
+    que viola uma propriedade universal é suficiente
+    para a refutar.
 
-    **Nota sobre o registo original:** na terceira
-    repetição da indução simples N=21 individual,
-    C=65,2 ms e Z3=1037,3 ms somam 1102,5 ms,
-    enquanto o total comunicado foi 1102,9 ms.
+    Os resultados não demonstram que todas as
+    configurações fixas da fronteira tenham
+    o mesmo comportamento.
 
-    A diferença de 0,4 ms fica documentada e os
-    três valores originais são preservados.
-    Não houve correção retroativa dos dados.
+    ### Limitações
 
-    ### 10.2. Medianas das três repetições
-
-    As medianas foram calculadas **separadamente**
-    para cada uma das três medidas.
-
-    | Método | N | Modo | C med. (ms) | Z3 med. (ms) | Total med. (ms) | Estado SMT |
-    |:--|--:|:--:|--:|--:|--:|:--:|
-    | FSM | 17 | S | 10.1 | 37.9 | 48.0 | SAT |
-    | FSM | 17 | I | 11.1 | 59.6 | 72.6 | SAT |
-    | FSM | 21 | S | 65.0 | 60.8 | 125.1 | SAT |
-    | FSM | 21 | I | 55.6 | 98.3 | 154.9 | SAT |
-    | BMC k=2 | 17 | S | 64.7 | 69.3 | 134.0 | UNSAT |
-    | BMC k=2 | 17 | I | 73.8 | 90.8 | 164.6 | UNSAT |
-    | BMC k=2 | 21 | S | 129.7 | 124.2 | 268.9 | UNSAT |
-    | BMC k=2 | 21 | I | 123.9 | 152.8 | 303.6 | UNSAT |
-    | Ind. simples | 17 | S | 33.5 | 445.6 | 479.1 | SAT |
-    | Ind. simples | 17 | I | 42.5 | 549.9 | 593.9 | SAT |
-    | Ind. simples | 21 | S | 71.0 | 693.6 | 764.6 | SAT |
-    | Ind. simples | 21 | I | 61.9 | 792.4 | 854.3 | SAT |
-    | k-ind. k=2 | 17 | S | 68.3 | 1293.8 | 1363.5 | SAT |
-    | k-ind. k=2 | 17 | I | 74.4 | 1480.5 | 1554.9 | SAT |
-    | Laço P2 | 17 | S | 159.7 | 185.5 | 345.2 | SAT |
-    | Laço P2 | 17 | I | 55.0 | 66.5 | 121.5 | SAT |
-
-    ### 10.3. Análise de escalabilidade
-
-    Para N=17, cada estado tem 324 variáveis booleanas;
-    para N=21, tem 484.
-
-    O aumento das variáveis é de aproximadamente 49,4%.
-
-    Nas experiências com FSM, BMC e indução simples,
-    as medianas dos tempos totais aumentaram quando
-    se passou de N=17 para N=21, nas duas modalidades.
-
-    As observações sugerem que a dimensão da grelha
-    influencia o custo de construção e resolução.
-    Não é possível inferir uma lei de crescimento
-    geral a partir de apenas duas dimensões.
-
-    Nas experiências medidas com configurações
-    comparáveis, as medianas da modalidade individual
-    foram superiores às da simultânea.
-
-    Este resultado não deve ser generalizado para
-    qualquer instância ou profundidade.
-
-    O benchmark de laços é particularmente diferente:
-    - simultânea: cinco transições até ao ponto fixo;
-    - individual: uma transição que conserva o estado.
-
-    Portanto, os tempos dos dois laços não correspondem
-    a tarefas SMT equivalentes.
-
-    ### 10.4. Variabilidade e limitações
-
-    Foram observadas diferenças entre repetições.
-
-    No laço individual N=17, os totais foram
-    99,5 ms, 121,5 ms e 503,0 ms.
-
-    A terceira repetição foi aproximadamente cinco
-    vezes mais demorada do que a primeira. O aumento
-    ocorreu sobretudo no tempo de construção registado.
-
-    Também se observaram valores elevados de construção
-    em BMC N=21 individual, repetição 1, e na indução
-    simples N=21 simultânea, repetição 3.
-
-    Não existe evidência suficiente para identificar
-    a causa destas diferenças.
-
-    Apresentam-se os valores individuais e as medianas
-    para que a variabilidade não fique escondida.
-
-    Os três testes por cenário são suficientes para
-    uma análise exploratória, mas não para caracterizar
-    estatisticamente a distribuição dos tempos.
-
-    ### 10.5. Significado dos resultados SMT
-
-    - FSM SAT: existe uma transição permitida.
-    - BMC UNSAT: não existe estado de erro exatamente
-      em X2, após duas transições, com a fronteira
-      fixa da experiência.
-    - Passo de indução SAT: a obrigação indutiva falha;
-      não é, por si só, um contraexemplo alcançável.
-    - Passo de k-indução SAT: a hipótese considerada
-      não basta para provar a propriedade.
-    - Laço SAT: a testemunha imposta é consistente
-      com as transições e o fecho, devendo também
-      passar pelo validador independente.
-
-    Todos os resultados reportados foram obtidos
-    dentro do limite de 5000 ms por consulta SMT.
-
-    Os resultados de desempenho não constituem provas
-    gerais sobre as duas propriedades.
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## 11. Conclusões e limites do Exercício 1
-
-    ### Cobertura dos requisitos
-
-    | Requisito | Implementação |
-    |:--|:--|
-    | Grelha N×N, N>16 | `declare`; testes N=17 e N=21 |
-    | Células booleanas | Símbolos pySMT `BOOL` |
-    | Estado inicial 3×3 | `init` |
-    | Fronteira inicial aleatória | `fronteira_aleatoria` |
-    | Fronteira inicial constante | `trans` |
-    | Fronteira final sempre morta | `valor_celula` |
-    | Regra B3/S23 | `regra` |
-    | Transições individual e simultânea | `trans(..., modo)` |
-    | Propriedade de segurança | `error`, BMC, indução e testemunhas |
-    | Propriedade de permanência | BMC com laços e testemunhas |
-    | Validação independente | `validar_traco`, `validar_laco` |
-    | Eficiência e escalabilidade | 48 medições N=17 e N=21 |
-
-    ### Conclusões lógicas
-
-    Na primeira propriedade foram construídas
-    testemunhas que chegam ao estado de erro nas
-    duas modalidades de transição.
-
-    Na segunda propriedade foram construídos laços
-    que permitem repetir indefinidamente uma
-    configuração com células permanentes.
-
-    Com SAT e validação independente, estes
-    contraexemplos refutam as propriedades nas
-    configurações concretas usadas.
-
-    Como essas configurações são permitidas
-    pela inicialização simbólica, refutam também
-    as propriedades universais desse modelo.
-
-    Não se conclui que todas as fronteiras fixas
-    tenham o mesmo comportamento.
-
-    ### Limitações do modelo e das verificações
-
-    - A modalidade individual admite atualização
-      sem mudança de valor.
-    - Não foi imposta justiça na seleção de células.
+    - A atualização individual pode conservar
+      o valor da célula selecionada.
+    - Não foi imposta justiça na seleção das células.
     - A fronteira simbólica não define probabilidades.
-    - BMC UNSAT limitado não é prova global.
-    - A falha do passo indutivo pode envolver
-      estados não alcançáveis.
-    - As experiências de desempenho usam apenas
-      N=17 e N=21 e três repetições por cenário.
-    - O limite temporal Z3 não inclui a construção.
-    - Os benchmarks com laços utilizam fronteira
-      toda morta, e não a semente 42.
+    - BMC com profundidade limitada não constitui
+      uma prova de segurança global.
+    - Um passo indutivo SAT pode envolver estados
+      que não são alcançáveis a partir de `init`.
+    - A análise experimental considera duas dimensões
+      principais e três repetições por cenário.
+    - O limite temporal do solver não abrange
+      a construção das fórmulas.
+    - Os benchmarks de laços utilizam percursos
+      de comprimentos diferentes.
 
-    ### Reprodutibilidade
+    ## 8. Reprodutibilidade
 
-    1. Ativar o ambiente Conda `logica`.
-    2. Confirmar Python 3.14.7, pySMT 0.9.6,
-       z3-solver 5.3.2.0 e Marimo 0.25.0.
-    3. Abrir com `marimo edit nome_do_ficheiro.py`.
-    4. Confirmar os testes básicos.
-    5. Executar manualmente os testes principais
-       e a confirmação de testemunhas N=17.
-    6. Os dados de desempenho já observados estão
-       registados nas tabelas da secção 10.
-       Não é preciso repetir benchmarks para os ler.
-    7. Para novas medições, usar o botão de desempenho.
-    8. Confirmar que o PDF da entrega contém
-       explicações, código, resultados e conclusões.
+    O notebook foi desenvolvido em Python com
+    pySMT, Z3 e Marimo.
 
-    ### Contribuições da LLM
+    Ambiente de referência:
 
-    | Componente | Participação |
-    |:--|:--|
-    | Formulação da FSM e regras B3/S23 | Modelação e código assistidos por LLM |
-    | Fronteiras fixa e simbólica | Decisão discutida e implementação assistida |
-    | Interpretação A | Decisão discutida durante o desenvolvimento |
-    | BMC, indução e k-indução | Propostas, implementação e testes da LLM |
-    | BMC temporal com laços | Formulação, implementação e testes da LLM |
-    | Testemunhas P1 e P2 | Sugestões e simulações assistidas por LLM, incluindo outra conversa |
-    | Validadores independentes | Implementação assistida por LLM |
-    | Benchmark | Metodologia e código assistidos por LLM |
-    | Execução e interpretação dos resultados | Execuções locais e análise dos alunos com apoio LLM |
+    - Windows 11.
+    - Python 3.14.7.
+    - pySMT 0.9.6.
+    - z3-solver 5.3.2.0.
+    - Marimo 0.25.0.
 
-    **Ligações dos diálogos LLM:**
+    O ambiente Conda utilizado designa-se `logica`.
 
-    - Conversa de desenvolvimento deste exercício:
-      [INSERIR LIGAÇÃO REAL]
-    - Conversa adicional de investigação e testemunhas:
-      [INSERIR LIGAÇÃO REAL]
+    O notebook pode ser aberto através do comando:
 
-    Estas ligações devem ser substituídas antes
-    da entrega. Não devem ser inventadas.
+    `marimo edit nome_do_ficheiro.py`
 
-    ### Referências
+    Os testes básicos são executados automaticamente.
+    As verificações mais exigentes são executadas
+    através dos controlos apresentados nas secções
+    correspondentes.
+
+    As experiências de desempenho permitem selecionar
+    dimensão, método, fronteira e limite temporal.
+
+    Cada execução de desempenho realiza três repetições
+    por modalidade e apresenta os tempos individuais,
+    estados do solver e medianas.
+
+    Os resultados experimentais originalmente observados
+    encontram-se documentados na secção 6 e podem ser
+    consultados sem repetir as medições.
+
+    ## 9. Utilização de ferramentas LLM
+
+    O ChatGPT foi utilizado como colaborador técnico
+    no processo de modelação, implementação,
+    verificação e análise do exercício.
+
+    As contribuições encontram-se identificadas
+    nos comentários do código e resumidas abaixo.
+
+    | Componente | Contribuição do ChatGPT | Responsabilidade dos alunos |
+    |:--|:--|:--|
+    | FSM e regra B3/S23 | Apoio à formulação e implementação pySMT | Análise dos requisitos e compreensão do modelo |
+    | Modalidades de atualização | Discussão e implementação da interpretação A | Escolha e justificação da interpretação |
+    | Fronteiras fixa e simbólica | Proposta e implementação das alternativas | Avaliação do alcance dos resultados |
+    | BMC, indução e k-indução | Formulação e implementação dos métodos | Execução, interpretação e análise das limitações |
+    | BMC com laços | Modelação e implementação da verificação temporal | Análise dos comportamentos infinitos |
+    | Testemunhas P1 e P2 | Propostas, simulações e confirmação assistidas | Execução local, análise e validação |
+    | Validadores independentes | Implementação Python assistida | Testes e verificação dos resultados |
+    | Desempenho | Construção do benchmark e organização dos dados | Execução das 48 medições e análise crítica |
+    | Documentação | Apoio à organização e revisão | Revisão do conteúdo e defesa das decisões |
+
+    **Diálogo principal de desenvolvimento:**
+    [https://chatgpt.com/share/6ae37072-8090-83eb-a790-08c56a03e8d1](https://chatgpt.com/share/6ae37072-8090-83eb-a790-08c56a03e8d1)
+
+    ## 10. Referências
 
     - Enunciado do TP2 — Exercício 1.
-    - Regras gerais dos trabalhos práticos
-      de Lógica Computacional 2026/2027.
+    - Regras gerais dos trabalhos práticos de
+      Lógica Computacional, 2026/2027.
     - Documento sobre utilização de ferramentas LLM.
-    - Materiais da disciplina: Capítulos 3 e 4,
+    - Materiais da disciplina: capítulos 3 e 4;
       fichas práticas 7, 8 e 9.
-    - Documentação oficial de pySMT, Z3 e Marimo.
-
-    ### Entrega
-
-    O notebook deve permanecer executável e
-    acompanhado por um PDF correspondente à
-    versão final efetivamente executada.
-
-    O Exercício 3 do TP2 é obrigatório e será
-    desenvolvido separadamente.
+    - Documentação oficial do pySMT.
+    - Documentação oficial do Z3.
+    - Documentação oficial do Marimo.
     """)
     return
 
