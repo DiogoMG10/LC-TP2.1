@@ -1244,7 +1244,7 @@ def _(mo):
 
     O notebook pode ser aberto através do comando:
 
-    `marimo edit nome_do_ficheiro.py`
+    `marimo edit TP2_GameOfLife_marimo.py`
 
     Os testes básicos são executados automaticamente.
     As verificações mais exigentes são executadas
